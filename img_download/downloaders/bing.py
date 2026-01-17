@@ -3,6 +3,7 @@ import asyncio
 import aiohttp
 import re
 import html
+import json
 from .base import BaseImageDownloader
 from ..logger import setup_logger
 
@@ -70,6 +71,9 @@ class BingDownloader(BaseImageDownloader):
         """
         分页搜索 Bing 图片，返回去重后的 URL 集合
 
+        重要：Bing 要求先访问主搜索页面建立 Session，然后才能请求 /images/async
+        关键：必须添加 Referer 头，否则分页会被限制
+
         Args:
             keyword: 搜索关键词
 
@@ -79,52 +83,80 @@ class BingDownloader(BaseImageDownloader):
         all_urls: Set[str] = set()
         empty_count = 0
 
-        for page in range(self.max_pages):
-            # 检查是否已达到上限（提前退出）
-            if len(all_urls) >= self.max_total_images:
-                logger.info(
-                    f"Reached max_total_images limit ({self.max_total_images}), stopping pagination"
-                )
-                break
+        # 构建完整的请求头（重要：Referer 是必需的）
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": f"https://www.bing.com/images/search?q={keyword}",
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        }
 
-            first = page * self.page_size
-
+        # 创建共享 Session（关键：保持 Cookie）
+        async with aiohttp.ClientSession() as session:
+            # 第一步：访问主搜索页面建立 Session
             try:
-                # 获取单页数据
-                urls = await self._fetch_page(keyword, first, self.page_size)
+                logger.info(f"Bing: initializing session for '{keyword}'...")
+                async with session.get(
+                    f"https://www.bing.com/images/search",
+                    params={"q": keyword},
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        cookies = session.cookie_jar.filter_cookies('https://www.bing.com')
+                        logger.info(f"Bing: session initialized with {len(cookies)} cookies")
+                    else:
+                        logger.warning(f"Bing: session init returned status {resp.status}")
+            except Exception as e:
+                logger.warning(f"Bing: session init failed: {e}, continuing anyway...")
 
-                # 验证 URL
-                valid_urls = await self._validate_urls(urls)
-
-                # 停止检查
-                if len(valid_urls) == 0:
-                    empty_count += 1
-                    if empty_count >= self.max_empty_pages:
-                        break
-                    # 空页直接跳过，不添加也不继续
-                    continue
-                else:
-                    empty_count = 0
-
-                # 软性停止：结果数 < 30%
-                # 先添加结果，再判断是否停止
-                all_urls.update(valid_urls)
-                logger.info(
-                    f"Bing page {page + 1}: found {len(valid_urls)} valid URLs "
-                    f"(total: {len(all_urls)})"
-                )
-
-                if len(valid_urls) < self.page_size * 0.3:
+            # 第二步：使用已建立的 Session 进行分页请求
+            for page in range(self.max_pages):
+                # 检查是否已达到上限（提前退出）
+                if len(all_urls) >= self.max_total_images:
+                    logger.info(
+                        f"Reached max_total_images limit ({self.max_total_images}), stopping pagination"
+                    )
                     break
 
-            except Exception as e:
-                logger.error(f"Error fetching Bing page {page + 1}: {e}")
-                # 继续尝试下一页，不中断整个流程
+                first = page * self.page_size
+
+                try:
+                    # 获取单页数据（使用共享 Session 和 headers）
+                    urls = await self._fetch_page(keyword, first, self.page_size, session, headers)
+
+                    # 验证 URL
+                    valid_urls = await self._validate_urls(urls)
+
+                    # 停止检查
+                    if len(valid_urls) == 0:
+                        empty_count += 1
+                        if empty_count >= self.max_empty_pages:
+                            break
+                        # 空页直接跳过，不添加也不继续
+                        continue
+                    else:
+                        empty_count = 0
+
+                    # 软性停止：结果数 < 30%
+                    # 先添加结果，再判断是否停止
+                    all_urls.update(valid_urls)
+                    logger.info(
+                        f"Bing page {page + 1}: found {len(valid_urls)} valid URLs "
+                        f"(total: {len(all_urls)})"
+                    )
+
+                    if len(valid_urls) < self.page_size * 0.3:
+                        break
+
+                except Exception as e:
+                    logger.error(f"Error fetching Bing page {page + 1}: {e}")
+                    # 继续尝试下一页，不中断整个流程
 
         logger.info(f"Bing pagination complete: {len(all_urls)} total unique URLs")
         return all_urls
 
-    async def _fetch_page(self, keyword: str, first: int, count: int) -> List[str]:
+    async def _fetch_page(self, keyword: str, first: int, count: int, session: aiohttp.ClientSession, headers: dict) -> List[str]:
         """
         获取单页图片 URL（带重试机制）
 
@@ -132,6 +164,8 @@ class BingDownloader(BaseImageDownloader):
             keyword: 搜索关键词
             first: 起始位置偏移量
             count: 请求的数量
+            session: 共享的 aiohttp ClientSession（保持 Cookie）
+            headers: 请求头（包含必需的 Referer）
 
         Returns:
             图片 URL 列表
@@ -148,31 +182,27 @@ class BingDownloader(BaseImageDownloader):
                     "count": count,
                 }
 
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                }
-
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        self.base_url,
-                        params=params,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=self.request_timeout)
-                    ) as response:
-                        if response.status == 200:
-                            html_content = await response.text()
-                            urls = self._parse_image_urls(html_content)
-                            if urls:  # 如果成功获取到 URL，直接返回
-                                return urls
-                            else:  # 状态码 200 但没有 URL，可能是空页
-                                logger.info(f"Bing page {first}: no URLs found (empty page)")
-                                return []
-                        else:
-                            logger.warning(
-                                f"Bing page {first}: failed with status {response.status}"
-                            )
-                            if attempt < self.max_retries - 1:
-                                await asyncio.sleep(1 * (attempt + 1))  # 指数退避
+                # 使用传入的共享 Session 和 headers（关键：保持 Cookie 和 Referer）
+                async with session.get(
+                    self.base_url,
+                    params=params,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=self.request_timeout)
+                ) as response:
+                    if response.status == 200:
+                        html_content = await response.text()
+                        urls = self._parse_image_urls(html_content)
+                        if urls:  # 如果成功获取到 URL，直接返回
+                            return urls
+                        else:  # 状态码 200 但没有 URL，可能是空页
+                            logger.info(f"Bing page {first}: no URLs found (empty page)")
+                            return []
+                    else:
+                        logger.warning(
+                            f"Bing page {first}: failed with status {response.status}"
+                        )
+                        if attempt < self.max_retries - 1:
+                            await asyncio.sleep(1 * (attempt + 1))  # 指数退避
 
             except asyncio.TimeoutError:
                 logger.warning(
@@ -191,19 +221,30 @@ class BingDownloader(BaseImageDownloader):
         return urls
 
     def _parse_image_urls(self, html_content: str) -> List[str]:
-        """从 HTML 中解析图片 URL"""
+        """从 HTML 中解析图片 URL
+
+        Bing 返回格式: <div class="iusc" m="{&quot;murl&quot;:&quot;URL&quot;,...}">
+        需要提取 m 属性，解码 HTML 实体，解析 JSON，提取 murl 字段
+        """
         urls = []
 
         try:
-            # Bing 返回的数据格式: murl&quot;:&quot;URL&quot;
-            # 使用正则表达式提取并解码 HTML 实体
-            pattern = r'murl&quot;:&quot;([^&]+)&quot;'
+            # 匹配 m="..." 属性（内容可能包含 HTML 转义）
+            pattern = r'm="([^"]{20,})"'
             matches = re.findall(pattern, html_content)
 
             for match in matches:
-                # 解码 HTML 实体（&quot; -> "）
-                decoded_url = html.unescape(match)
-                urls.append(decoded_url)
+                try:
+                    # 解码 HTML 实体（&quot; -> ", &amp; -> &）
+                    decoded = html.unescape(match)
+                    # 解析 JSON
+                    data = json.loads(decoded)
+                    # 提取 murl 字段
+                    if 'murl' in data:
+                        urls.append(data['murl'])
+                except (json.JSONDecodeError, KeyError) as e:
+                    # 静默跳过无法解析的条目
+                    continue
 
         except Exception as e:
             logger.error(f"Error parsing HTML: {e}")
