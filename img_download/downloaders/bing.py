@@ -16,11 +16,12 @@ class BingDownloader(BaseImageDownloader):
     page_size = 35
     max_pages = 20
     max_empty_pages = 2
+    max_total_images = 2000  # 添加此属性以支持上限检查
 
     def __init__(self):
         super().__init__("bing")
         self.base_url = "https://www.bing.com/images/async"
-        self.request_timeout = 30  # 单次请求超时 30 秒
+        self.request_timeout = 60  # 增加超时时间：30 → 60 秒
         self.max_retries = 3  # 最大重试次数
 
     async def search(self, keyword: str, count: int) -> List[str]:
@@ -79,6 +80,13 @@ class BingDownloader(BaseImageDownloader):
         empty_count = 0
 
         for page in range(self.max_pages):
+            # 检查是否已达到上限（提前退出）
+            if len(all_urls) >= self.max_total_images:
+                logger.info(
+                    f"Reached max_total_images limit ({self.max_total_images}), stopping pagination"
+                )
+                break
+
             first = page * self.page_size
 
             try:
@@ -171,7 +179,7 @@ class BingDownloader(BaseImageDownloader):
                     f"Bing page {first}: timeout (attempt {attempt + 1}/{self.max_retries})"
                 )
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(2 * (attempt + 1))  # 指数退避
+                    await asyncio.sleep(3 * (attempt + 1))  # 增加退避时间：2 → 3 秒
             except Exception as e:
                 error_msg = str(e) if str(e) else type(e).__name__
                 logger.error(

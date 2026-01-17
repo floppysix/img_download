@@ -54,7 +54,7 @@ class BaseImageDownloader(ABC):
         """
         logger = setup_logger()
         valid_urls = []
-        semaphore = asyncio.Semaphore(20)  # 提高并发到 20
+        semaphore = asyncio.Semaphore(50)  # 提高并发到 50（性能优化）
 
         # 复用 ClientSession（关键优化）
         async with aiohttp.ClientSession() as session:

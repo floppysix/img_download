@@ -91,6 +91,13 @@ class BaiduDownloader(BaseImageDownloader, SeleniumMixin):
         logger.info(f"[DEBUG] Starting pagination for keyword '{keyword}', max_pages={self.max_pages}")
 
         for page in range(self.max_pages):
+            # 检查是否已达到上限（提前退出）
+            if len(all_urls) >= self.max_total_images:
+                logger.info(
+                    f"Reached max_total_images limit ({self.max_total_images}), stopping pagination"
+                )
+                break
+
             pn = page * self.page_size
 
             try:
@@ -306,6 +313,13 @@ class BaiduDownloader(BaseImageDownloader, SeleniumMixin):
         try:
             # 等待页面加载完成（重要：给图片加载时间）
             time.sleep(2)
+
+            # 检查是否已达到上限（提前退出，避免浪费时间）
+            if len(self._collected_urls) >= self.max_total_images:
+                logger.info(
+                    f"Already reached max_total_images limit ({self.max_total_images}), skipping extraction"
+                )
+                return []
 
             # 方法 1: 提取所有 img[src]，直接使用 src 属性
             img_elements = driver.find_elements(By.TAG_NAME, "img")
