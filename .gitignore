@@ -7,5 +7,17 @@ __pycache__/
 htmlcov/
 *.log
 output/
+test_output/
 dist/
 *.egg-info/
+
+# Editor files
+.claude/
+.idea/
+*.iml
+
+# Test files
+test_*.py
+debug_*.py
+debug_*.html
+

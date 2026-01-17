@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import aiohttp
@@ -47,23 +48,25 @@ class ImageDownloader:
 
         logger.info(f"Starting search for '{keyword}', count: {count}, sources: {sources}")
 
-        # 获取图片 URL
-        all_urls = []
+        # 收集所有来源的 URL（带来源标记）
+        url_sources = []
         for source in sources:
             if source in self.downloaders:
                 urls = await self.downloaders[source].search(keyword, count)
-                all_urls.extend(urls)
+                for url in urls:
+                    url_sources.append((url, source))
 
         # 限制数量
-        all_urls = all_urls[:count]
+        url_sources = url_sources[:count]
 
         # 并发下载
-        stats = await self._download_concurrent(keyword, keyword_dir, all_urls)
+        stats = await self._download_concurrent(keyword, keyword_dir, url_sources)
 
         return {
             "total": count,
             "success": stats["success"],
             "failed": stats["failed"],
+            "sources": stats.get("sources", {}),
             "path": str(keyword_dir)
         }
 
@@ -71,11 +74,13 @@ class ImageDownloader:
         self,
         keyword: str,
         save_dir: Path,
-        urls: List[str]
+        url_sources: List[tuple]
     ) -> Dict[str, Any]:
         """并发下载图片"""
         success_count = 0
         failed_count = 0
+        source_stats = {}
+        download_records = []
 
         # 创建信号量控制并发数
         semaphore = asyncio.Semaphore(self.max_concurrent)
@@ -83,15 +88,36 @@ class ImageDownloader:
         async with aiohttp.ClientSession() as session:
             # 绑定 session 到 download_image
             tasks = []
-            for i, url in enumerate(urls):
+            for idx, (url, source) in enumerate(url_sources):
                 # 创建闭包捕获正确的 url 和 session
-                async def bound_download(u=url, idx=i):
+                async def bound_download(u=url, s=source, i=idx):
                     async with semaphore:
-                        # 使用实际文件扩展名
+                        # 文件命名格式: 关键词_序号.扩展名
                         ext = self._get_extension(u)
-                        filename = f"img_{idx:03d}{ext}"
+                        filename = f"{keyword}_{i + 1}{ext}"
                         save_path = save_dir / filename
-                        return await download_image(u, save_path, session)
+
+                        # 下载
+                        result = await download_image(u, save_path, session)
+
+                        # 记录下载信息
+                        record = {
+                            "filename": filename,
+                            "source": s,
+                            "url": u,
+                            "success": result
+                        }
+                        download_records.append(record)
+
+                        # 更新来源统计
+                        if s not in source_stats:
+                            source_stats[s] = {"success": 0, "failed": 0}
+                        if result:
+                            source_stats[s]["success"] += 1
+                        else:
+                            source_stats[s]["failed"] += 1
+
+                        return result
 
                 tasks.append(bound_download())
 
@@ -106,10 +132,24 @@ class ImageDownloader:
                 else:
                     failed_count += 1
 
+        # 保存来源记录到 JSON 文件
+        self._save_source_records(save_dir, download_records)
+
         return {
             "success": success_count,
-            "failed": failed_count
+            "failed": failed_count,
+            "sources": source_stats
         }
+
+    def _save_source_records(self, save_dir: Path, records: List[Dict]):
+        """保存图片来源记录到 JSON 文件"""
+        records_file = save_dir / "sources.json"
+        try:
+            with open(records_file, "w", encoding="utf-8") as f:
+                json.dump(records, f, ensure_ascii=False, indent=2)
+            logger.info(f"Source records saved to: {records_file}")
+        except Exception as e:
+            logger.error(f"Failed to save source records: {e}")
 
     def _get_extension(self, url: str) -> str:
         """从 URL 获取文件扩展名"""

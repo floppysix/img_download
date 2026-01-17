@@ -14,11 +14,11 @@ async def test_bing_search_with_mock_html(mocker):
     """测试 HTML 解析功能"""
     downloader = BingDownloader()
 
-    # Mock HTML 响应（模拟 Bing 返回的 HTML）
+    # Mock HTML 响应（模拟 Bing 返回的实际格式，包含 HTML 实体编码）
     mock_html = '''
-    <div class="imgpt" murl="https://example.com/image1.jpg"></div>
-    <div class="imgpt" murl="https://example.com/image2.png"></div>
-    <div class="imgpt" murl="https://example.com/image3.gif"></div>
+    <div class="imgpt" murl&quot;:&quot;https://example.com/image1.jpg&quot;</div>
+    <div class="imgpt" murl&quot;:&quot;https://example.com/image2.png&quot;</div>
+    <div class="imgpt" murl&quot;:&quot;https://example.com/image3.gif&quot;</div>
     '''
 
     # Create response mock
