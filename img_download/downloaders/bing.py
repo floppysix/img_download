@@ -19,6 +19,7 @@ class BingDownloader(BaseImageDownloader):
     def __init__(self):
         super().__init__("bing")
         self.base_url = "https://www.bing.com/images/async"
+        self.request_timeout = 60  # 增加到 60 秒
 
     async def search(self, keyword: str, count: int) -> List[str]:
         """
@@ -45,7 +46,7 @@ class BingDownloader(BaseImageDownloader):
                     self.base_url,
                     params=params,
                     headers=headers,
-                    timeout=30
+                    timeout=aiohttp.ClientTimeout(total=self.request_timeout)
                 ) as response:
                     if response.status == 200:
                         html = await response.text()
@@ -144,7 +145,7 @@ class BingDownloader(BaseImageDownloader):
                     self.base_url,
                     params=params,
                     headers=headers,
-                    timeout=30
+                    timeout=aiohttp.ClientTimeout(total=self.request_timeout)
                 ) as response:
                     if response.status == 200:
                         html_content = await response.text()
@@ -155,7 +156,16 @@ class BingDownloader(BaseImageDownloader):
                         )
 
         except Exception as e:
-            logger.error(f"Error fetching Bing page (first={first}): {e}")
+            # 详细的错误日志
+            error_msg = str(e) if str(e) else type(e).__name__
+            logger.error(
+                f"Error fetching Bing page (first={first}): {error_msg}"
+            )
+            # 如果是空错误，打印完整异常信息用于调试
+            if not str(e):
+                import traceback
+                logger.error(f"Full exception info: {type(e).__name__}")
+                logger.error(f"Exception attributes: {dir(e)}")
 
         return urls
 
