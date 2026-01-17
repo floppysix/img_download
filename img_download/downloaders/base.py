@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import asyncio
 from typing import List, Set
 import aiohttp
 
@@ -48,7 +49,6 @@ class BaseImageDownloader(ABC):
         Returns:
             有效的 URL 列表
         """
-        import asyncio
         from ..logger import setup_logger
 
         logger = setup_logger()
@@ -59,7 +59,9 @@ class BaseImageDownloader(ABC):
             try:
                 async with semaphore:
                     async with aiohttp.ClientSession() as session:
-                        async with session.head(url, timeout=10) as resp:
+                        async with session.head(
+                            url, timeout=aiohttp.ClientTimeout(total=10)
+                        ) as resp:
                             return resp.status == 200 and self._is_image(resp)
             except Exception:
                 return False
@@ -78,12 +80,20 @@ class BaseImageDownloader(ABC):
 
         return valid_urls
 
-    def _is_image(self, response) -> bool:
+    def _is_image(self, response: aiohttp.ClientResponse) -> bool:
         """检查响应是否为图片"""
         ct = response.headers.get('Content-Type', '')
         return ct.startswith('image/')
 
-    def _should_stop(self, valid_urls: List[str], page_size: int, empty_count: int, current_page: int = 0, max_pages: int = 20, max_empty_pages: int = 2) -> bool:
+    def _should_stop(
+        self,
+        valid_urls: List[str],
+        page_size: int,
+        empty_count: int,
+        current_page: int = 0,
+        max_pages: int = 20,
+        max_empty_pages: int = 2,
+    ) -> bool:
         """
         判断是否应该停止分页
 

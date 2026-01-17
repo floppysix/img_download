@@ -8,6 +8,16 @@ def test_base_is_abstract():
         BaseImageDownloader()
 
 
+# Concrete downloader for testing pagination and abstract methods
+class ConcreteDownloader(BaseImageDownloader):
+    """Concrete implementation for testing purposes"""
+
+    async def search(self, keyword: str, count: int) -> list:
+        return []
+
+    # Deliberately not implementing search_with_pagination to test NotImplementedError
+
+
 def test_concrete_downloader():
     """子类必须实现 search 方法"""
 
@@ -20,6 +30,48 @@ def test_concrete_downloader():
 
     downloader = TestDownloader("test")
     assert downloader.name == "test"
+
+
+@pytest.mark.asyncio
+async def test_should_stop_hard_limit():
+    """Test stopping at max_pages limit"""
+    downloader = ConcreteDownloader("test")
+    assert downloader._should_stop([], 35, 0, current_page=20, max_pages=20) is True
+    assert downloader._should_stop([], 35, 0, current_page=19, max_pages=20) is False
+
+
+@pytest.mark.asyncio
+async def test_should_stop_empty_pages():
+    """Test stopping after consecutive empty pages"""
+    downloader = ConcreteDownloader("test")
+    assert downloader._should_stop([], 35, 2, current_page=0) is True
+    assert downloader._should_stop([], 35, 1, current_page=0) is False
+
+
+@pytest.mark.asyncio
+async def test_should_stop_low_results():
+    """Test stopping when results < 30% of page size"""
+    downloader = ConcreteDownloader("test")
+    # 9 results < 35 * 0.3 = 10.5
+    assert downloader._should_stop(['url'] * 9, 35, 0, current_page=0) is True
+    assert downloader._should_stop(['url'] * 11, 35, 0, current_page=0) is False
+
+
+@pytest.mark.asyncio
+async def test_should_stop_continue():
+    """Test pagination should continue"""
+    downloader = ConcreteDownloader("test")
+    assert downloader._should_stop(['url'] * 30, 35, 0, current_page=0) is False
+
+
+@pytest.mark.asyncio
+async def test_search_with_pagination_not_implemented():
+    """Test NotImplementedError when calling unimplemented pagination"""
+    downloader = ConcreteDownloader("test")
+    with pytest.raises(
+        NotImplementedError, match="must implement search_with_pagination"
+    ):
+        await downloader.search_with_pagination("test")
 
 
 @pytest.mark.asyncio
