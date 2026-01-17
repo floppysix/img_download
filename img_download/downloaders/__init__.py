@@ -1,3 +1,4 @@
 from .base import BaseImageDownloader
+from .bing import BingDownloader
 
-__all__ = ["BaseImageDownloader"]
+__all__ = ["BaseImageDownloader", "BingDownloader"]
