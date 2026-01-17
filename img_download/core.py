@@ -13,14 +13,46 @@ logger = setup_logger()
 class ImageDownloader:
     """图片搜索与下载调度器"""
 
-    def __init__(self, output_dir: str = "output", max_concurrent: int = 10):
+    def __init__(
+        self,
+        output_dir: str = "output",
+        max_concurrent: int = 10,
+        selenium_enabled: bool = True,
+        headless: bool = True
+    ):
+        """
+        初始化图片下载器
+
+        Args:
+            output_dir: 输出目录
+            max_concurrent: 最大并发下载数
+            selenium_enabled: 是否启用 Selenium
+            headless: 是否使用无头模式
+        """
         self.output_dir = Path(output_dir)
         self.max_concurrent = max_concurrent
+        self.selenium_enabled = selenium_enabled
+
+        # 初始化下载器
         self.downloaders = {
             "bing": BingDownloader(),
             "baidu": BaiduDownloader(),
             "google": GoogleDownloader(),
         }
+
+        # 配置 Selenium
+        if self.selenium_enabled:
+            self._configure_selenium(headless)
+
+    def _configure_selenium(self, headless: bool):
+        """配置 Selenium（设置 headless 模式）
+
+        Args:
+            headless: 是否使用无头模式
+        """
+        for downloader in ["baidu", "google"]:
+            if hasattr(self.downloaders[downloader], "set_headless"):
+                self.downloaders[downloader].set_headless(headless)
 
     async def search(
         self,

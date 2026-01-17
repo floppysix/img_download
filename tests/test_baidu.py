@@ -106,6 +106,9 @@ async def test_baidu_search_non_200_status(mocker):
 async def test_search_with_pagination_mock(mocker):
     """测试分页搜索功能（使用 mock）"""
     downloader = BaiduDownloader()
+    # 测试时只获取 2 页，加快测试速度
+    original_max_pages = downloader.max_pages
+    downloader.max_pages = 2
 
     # Mock JSON 响应 - 每页返回不同的 URL
     page_0_data = [
@@ -166,6 +169,8 @@ async def test_search_with_pagination_mock(mocker):
 async def test_search_with_pagination_stop_conditions(mocker):
     """测试停止条件"""
     downloader = BaiduDownloader()
+    # 测试时只获取 2 页
+    downloader.max_pages = 2
 
     # Mock validation - 模拟第一页有结果，第二页为空
     async def mock_validate(urls):
@@ -199,6 +204,7 @@ async def test_search_with_pagination_stop_conditions(mocker):
 async def test_search_with_pagination_soft_stop(mocker):
     """测试软性停止条件（结果数 < 30%）"""
     downloader = BaiduDownloader()
+    downloader.max_pages = 2
 
     # Mock validation - 返回少于 30% 的结果
     async def mock_validate(urls):

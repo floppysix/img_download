@@ -6,6 +6,8 @@ requires-python = ">=3.10"
 dependencies = [
     "aiohttp>=3.9.0",
     "selectolax>=0.3.0",
+    "selenium>=4.15.0",
+    "webdriver-manager>=4.0.0",
 ]
 
 [project.optional-dependencies]

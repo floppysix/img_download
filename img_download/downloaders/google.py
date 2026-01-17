@@ -2,13 +2,14 @@ from typing import List, Set
 import aiohttp
 import re
 from .base import BaseImageDownloader
+from .selenium_mixin import SeleniumMixin
 from ..logger import setup_logger
 
 logger = setup_logger()
 
 
-class GoogleDownloader(BaseImageDownloader):
-    """Google 图片下载器 - 纯爬虫实现"""
+class GoogleDownloader(BaseImageDownloader, SeleniumMixin):
+    """Google 图片下载器 - aiohttp + Selenium 混合模式"""
 
     # 分页配置参数
     page_size = 20
@@ -24,7 +25,8 @@ class GoogleDownloader(BaseImageDownloader):
     REQUEST_TIMEOUT = 30
 
     def __init__(self):
-        super().__init__("google")
+        BaseImageDownloader.__init__(self, "google")
+        SeleniumMixin.__init__(self)
         self.base_url = "https://www.google.com/search"
 
     async def search(self, keyword: str, count: int) -> List[str]:
@@ -124,7 +126,34 @@ class GoogleDownloader(BaseImageDownloader):
 
     async def _fetch_page(self, keyword: str, start: int, count: int) -> List[str]:
         """
-        获取单页图片 URL
+        获取单页图片 URL（混合模式：aiohttp 优先，Selenium 备用）
+
+        Args:
+            keyword: 搜索关键词
+            start: 起始位置偏移量（0, 20, 40, ...）
+            count: 请求的数量
+
+        Returns:
+            图片 URL 列表
+        """
+        # 策略 1: 先尝试 aiohttp
+        urls = await self._fetch_with_aiohttp(keyword, start, count)
+        if urls:
+            return urls
+
+        # 策略 2: aiohttp 失败，使用 Selenium
+        logger.info("Google aiohttp failed, trying Selenium...")
+        page_num = start // self.page_size
+        return await self._fetch_with_selenium(keyword, page_num)
+
+    async def _fetch_with_aiohttp(
+        self,
+        keyword: str,
+        start: int,
+        count: int
+    ) -> List[str]:
+        """
+        使用 aiohttp 获取单页图片 URL
 
         Args:
             keyword: 搜索关键词
@@ -158,12 +187,12 @@ class GoogleDownloader(BaseImageDownloader):
                         urls = self._parse_image_urls(html_content)
                     else:
                         logger.warning(
-                            f"Google page start={start}: "
-                            f"failed with status {response.status}"
+                            f"Google aiohttp failed (start={start}): "
+                            f"status {response.status}"
                         )
 
         except Exception as e:
-            logger.error(f"Error fetching Google page (start={start}): {e}")
+            logger.warning(f"Google aiohttp error: {e}")
 
         return urls
 
@@ -204,3 +233,70 @@ class GoogleDownloader(BaseImageDownloader):
             logger.error(f"Error parsing HTML: {e}")
 
         return urls
+
+    # ========== Selenium 相关方法 ==========
+
+    def _build_selenium_url(self, keyword: str, page: int) -> str:
+        """
+        构建谷歌搜索 URL（Selenium 用）
+
+        Args:
+            keyword: 搜索关键词
+            page: 页码
+
+        Returns:
+            谷歌图片搜索 URL
+        """
+        return f"https://www.google.com/search?tbm=isch&q={keyword}"
+
+    def _extract_image_urls(self, driver) -> List[str]:
+        """
+        从页面提取图片 URL（Selenium 用）
+
+        Args:
+            driver: Selenium WebDriver 实例
+
+        Returns:
+            图片 URL 列表
+        """
+        from selenium.webdriver.common.by import By
+
+        urls = set()  # 使用 set 自动去重
+
+        # 策略 1: Google 的 data-url 属性
+        try:
+            img_elements = driver.find_elements(
+                By.CSS_SELECTOR,
+                "img[data-url]"
+            )
+            for img in img_elements:
+                url = img.get_attribute("data-url")
+                if url and url.startswith("http"):
+                    urls.add(url)
+        except Exception:
+            pass
+
+        # 策略 2: 常规 src/data-src
+        try:
+            all_images = driver.find_elements(By.TAG_NAME, "img")
+            for img in all_images:
+                for attr in ["src", "data-src"]:
+                    url = img.get_attribute(attr)
+                    if (url and url.startswith("http") and
+                        "logo" not in url.lower()):
+                        urls.add(url)
+        except Exception:
+            pass
+
+        # 策略 3: 页面中的 JSON 格式
+        try:
+            page_source = driver.page_source
+            pattern = r'"ou":"([^"]+)"'
+            matches = re.findall(pattern, page_source)
+            for match in matches:
+                if match.startswith("http"):
+                    urls.add(match)
+        except Exception:
+            pass
+
+        return list(urls)

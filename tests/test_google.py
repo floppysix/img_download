@@ -188,6 +188,7 @@ async def test_search_with_pagination_mock(mocker):
 async def test_search_with_pagination_stop_conditions(mocker):
     """测试停止条件"""
     downloader = GoogleDownloader()
+    downloader.max_pages = 2
 
     # Mock validation - 模拟第一页有结果，第二页为空
     async def mock_validate(urls):

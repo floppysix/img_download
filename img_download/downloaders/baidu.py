@@ -2,13 +2,14 @@ from typing import List, Set, Dict, Any
 import aiohttp
 from selectolax.lexbor import LexborHTMLParser
 from .base import BaseImageDownloader
+from .selenium_mixin import SeleniumMixin
 from ..logger import setup_logger
 
 logger = setup_logger()
 
 
-class BaiduDownloader(BaseImageDownloader):
-    """百度图片下载器 - 纯爬虫实现"""
+class BaiduDownloader(BaseImageDownloader, SeleniumMixin):
+    """百度图片下载器 - aiohttp + Selenium 混合模式"""
 
     # 分页配置参数
     page_size = 20
@@ -23,7 +24,8 @@ class BaiduDownloader(BaseImageDownloader):
     REQUEST_TIMEOUT = 30
 
     def __init__(self):
-        super().__init__("baidu")
+        BaseImageDownloader.__init__(self, "baidu")
+        SeleniumMixin.__init__(self)
         self.base_url = "https://image.baidu.com/search/index"
         self.api_url = "https://image.baidu.com/search/acjson"
 
@@ -127,7 +129,34 @@ class BaiduDownloader(BaseImageDownloader):
 
     async def _fetch_page(self, keyword: str, pn: int, count: int) -> List[str]:
         """
-        获取单页图片 URL
+        获取单页图片 URL（混合模式：aiohttp 优先，Selenium 备用）
+
+        Args:
+            keyword: 搜索关键词
+            pn: 起始位置偏移量（0, 20, 40, ...）
+            count: 请求的数量
+
+        Returns:
+            图片 URL 列表
+        """
+        # 策略 1: 先尝试 aiohttp
+        urls = await self._fetch_with_aiohttp(keyword, pn, count)
+        if urls:
+            return urls
+
+        # 策略 2: aiohttp 失败，使用 Selenium
+        logger.info("Baidu aiohttp failed, trying Selenium...")
+        page_num = pn // self.page_size
+        return await self._fetch_with_selenium(keyword, page_num)
+
+    async def _fetch_with_aiohttp(
+        self,
+        keyword: str,
+        pn: int,
+        count: int
+    ) -> List[str]:
+        """
+        使用 aiohttp 获取单页图片 URL
 
         Args:
             keyword: 搜索关键词
@@ -167,12 +196,12 @@ class BaiduDownloader(BaseImageDownloader):
                         urls = self._parse_image_urls_from_json(json_data)
                     else:
                         logger.warning(
-                            f"Baidu page pn={pn}: "
-                            f"failed with status {response.status}"
+                            f"Baidu aiohttp failed (pn={pn}): "
+                            f"status {response.status}"
                         )
 
         except Exception as e:
-            logger.error(f"Error fetching Baidu page (pn={pn}): {e}")
+            logger.warning(f"Baidu aiohttp error: {e}")
 
         return urls
 
@@ -224,5 +253,55 @@ class BaiduDownloader(BaseImageDownloader):
 
         except Exception as e:
             logger.error(f"Error parsing HTML: {e}")
+
+        return urls
+
+    # ========== Selenium 相关方法 ==========
+
+    def _build_selenium_url(self, keyword: str, page: int) -> str:
+        """
+        构建百度搜索 URL（Selenium 用）
+
+        Args:
+            keyword: 搜索关键词
+            page: 页码
+
+        Returns:
+            百度图片搜索 URL
+        """
+        offset = page * self.page_size
+        return (
+            f"https://image.baidu.com/search/index"
+            f"?tn=baiduimage&word={keyword}&pn={offset}"
+        )
+
+    def _extract_image_urls(self, driver) -> List[str]:
+        """
+        从页面提取图片 URL（Selenium 用）
+
+        Args:
+            driver: Selenium WebDriver 实例
+
+        Returns:
+            图片 URL 列表
+        """
+        from selenium.webdriver.common.by import By
+
+        urls = []
+
+        try:
+            # 百度的图片在 data-imgurl 属性中
+            img_elements = driver.find_elements(
+                By.CSS_SELECTOR,
+                "img[data-imgurl]"
+            )
+
+            for img in img_elements:
+                url = img.get_attribute("data-imgurl")
+                if url and url.startswith("http"):
+                    urls.append(url)
+
+        except Exception as e:
+            logger.warning(f"Error extracting URLs with Selenium: {e}")
 
         return urls
