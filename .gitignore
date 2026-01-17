@@ -8,6 +8,7 @@ htmlcov/
 *.log
 output/
 test_output/
+test_*/
 dist/
 *.egg-info/
 
@@ -21,3 +22,7 @@ test_*.py
 debug_*.py
 debug_*.html
 
+# Downloaded images and test directories
+verify_*.py
+diagnose.py
+nul
