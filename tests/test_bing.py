@@ -74,3 +74,22 @@ async def test_bing_search_empty_result(mocker):
     result = await downloader.search("nonexistent", 10)
 
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_bing_search_non_200_status(mocker):
+    """测试非200状态码"""
+    downloader = BingDownloader()
+
+    mock_response = mocker.Mock()
+    mock_response.status = 404
+
+    mock_session = mocker.Mock()
+    mock_session.get = mocker.AsyncMock(return_value=mock_response)
+    mock_session.get.return_value.__aenter__ = mocker.AsyncMock(return_value=mock_response)
+    mock_session.get.return_value.__aexit__ = mocker.AsyncMock()
+
+    mocker.patch("aiohttp.ClientSession", return_value=mock_session)
+
+    result = await downloader.search("cat", 10)
+    assert result == []
