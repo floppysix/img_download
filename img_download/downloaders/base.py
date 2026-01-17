@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import asyncio
 from typing import List, Set
 import aiohttp
+from ..logger import setup_logger
 
 
 class BaseImageDownloader(ABC):
@@ -37,7 +38,9 @@ class BaseImageDownloader(ABC):
         Returns:
             去重后的图片 URL 集合
         """
-        raise NotImplementedError(f"{self.__class__.__name__} must implement search_with_pagination()")
+        class_name = self.__class__.__name__
+        msg = f"{class_name} must implement search_with_pagination()"
+        raise NotImplementedError(msg)
 
     async def _validate_urls(self, urls: List[str]) -> List[str]:
         """
@@ -49,8 +52,6 @@ class BaseImageDownloader(ABC):
         Returns:
             有效的 URL 列表
         """
-        from ..logger import setup_logger
-
         logger = setup_logger()
         valid_urls = []
         semaphore = asyncio.Semaphore(10)  # 10 并发验证

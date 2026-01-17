@@ -1,5 +1,6 @@
 import pytest
 from img_download.downloaders import BaseImageDownloader
+from unittest.mock import MagicMock, patch
 
 
 def test_base_is_abstract():
@@ -15,7 +16,8 @@ class ConcreteDownloader(BaseImageDownloader):
     async def search(self, keyword: str, count: int) -> list:
         return []
 
-    # Deliberately not implementing search_with_pagination to test NotImplementedError
+    # Not implementing search_with_pagination to test
+    # NotImplementedError
 
 
 def test_concrete_downloader():
@@ -36,8 +38,14 @@ def test_concrete_downloader():
 async def test_should_stop_hard_limit():
     """Test stopping at max_pages limit"""
     downloader = ConcreteDownloader("test")
-    assert downloader._should_stop([], 35, 0, current_page=20, max_pages=20) is True
-    assert downloader._should_stop([], 35, 0, current_page=19, max_pages=20) is False
+    result = downloader._should_stop(
+        [], 35, 0, current_page=20, max_pages=20
+    )
+    assert result is True
+    result = downloader._should_stop(
+        [], 35, 0, current_page=19, max_pages=20
+    )
+    assert result is False
 
 
 @pytest.mark.asyncio
@@ -53,15 +61,24 @@ async def test_should_stop_low_results():
     """Test stopping when results < 30% of page size"""
     downloader = ConcreteDownloader("test")
     # 9 results < 35 * 0.3 = 10.5
-    assert downloader._should_stop(['url'] * 9, 35, 0, current_page=0) is True
-    assert downloader._should_stop(['url'] * 11, 35, 0, current_page=0) is False
+    result = downloader._should_stop(
+        ['url'] * 9, 35, 0, current_page=0
+    )
+    assert result is True
+    result = downloader._should_stop(
+        ['url'] * 11, 35, 0, current_page=0
+    )
+    assert result is False
 
 
 @pytest.mark.asyncio
 async def test_should_stop_continue():
     """Test pagination should continue"""
     downloader = ConcreteDownloader("test")
-    assert downloader._should_stop(['url'] * 30, 35, 0, current_page=0) is False
+    result = downloader._should_stop(
+        ['url'] * 30, 35, 0, current_page=0
+    )
+    assert result is False
 
 
 @pytest.mark.asyncio
@@ -77,7 +94,6 @@ async def test_search_with_pagination_not_implemented():
 @pytest.mark.asyncio
 async def test_validate_urls_with_mock(mocker):
     """测试 URL 验证功能"""
-    from unittest.mock import MagicMock, AsyncMock, patch
 
     class TestDownloader(BaseImageDownloader):
         async def search(self, keyword: str, count: int) -> list:
@@ -133,8 +149,13 @@ async def test_validate_urls_with_mock(mocker):
             pass
 
     # Patch aiohttp.ClientSession
-    with patch('img_download.downloaders.base.aiohttp.ClientSession', return_value=MockSession()):
-        urls = ["http://example.com/1.jpg", "http://example.com/2.jpg", "http://example.com/3.jpg"]
+    patch_target = 'img_download.downloaders.base.aiohttp.ClientSession'
+    with patch(patch_target, return_value=MockSession()):
+        urls = [
+            "http://example.com/1.jpg",
+            "http://example.com/2.jpg",
+            "http://example.com/3.jpg"
+        ]
         result = await downloader._validate_urls(urls)
 
     assert len(result) == 1  # 只有第一个是有效图片
