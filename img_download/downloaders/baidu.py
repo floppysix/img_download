@@ -1,5 +1,4 @@
-import asyncio
-from typing import List, Set
+from typing import List, Set, Dict, Any
 import aiohttp
 from selectolax.lexbor import LexborHTMLParser
 from .base import BaseImageDownloader
@@ -16,6 +15,13 @@ class BaiduDownloader(BaseImageDownloader):
     max_pages = 20
     max_empty_pages = 2
 
+    # HTTP 请求配置
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36"
+    )
+    REQUEST_TIMEOUT = 30
+
     def __init__(self):
         super().__init__("baidu")
         self.base_url = "https://image.baidu.com/search/index"
@@ -30,31 +36,34 @@ class BaiduDownloader(BaseImageDownloader):
         urls = []
 
         try:
-            params = {
+            params: Dict[str, Any] = {
                 "tn": "baiduimage",
                 "word": keyword,
                 "pn": 0,
                 "rn": count * 2,
             }
 
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
+            headers = {"User-Agent": self.USER_AGENT}
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     self.base_url,
                     params=params,
                     headers=headers,
-                    timeout=30
+                    timeout=aiohttp.ClientTimeout(total=self.REQUEST_TIMEOUT)
                 ) as response:
                     if response.status == 200:
                         html = await response.text()
                         urls = self._parse_image_urls(html)
                         urls = [u for u in urls if u.startswith("http")][:count]
-                        logger.info(f"Baidu: found {len(urls)} images for '{keyword}'")
+                        logger.info(
+                            f"Baidu: found {len(urls)} images "
+                            f"for '{keyword}'"
+                        )
                     else:
-                        logger.warning(f"Baidu: failed with status {response.status}")
+                        logger.warning(
+                            f"Baidu: failed with status {response.status}"
+                        )
 
         except Exception as e:
             logger.error(f"Baidu search error: {e}")
@@ -98,7 +107,8 @@ class BaiduDownloader(BaseImageDownloader):
                 # 先添加结果，再判断是否停止
                 all_urls.update(valid_urls)
                 logger.info(
-                    f"Baidu page {page + 1}: found {len(valid_urls)} valid URLs "
+                    f"Baidu page {page + 1}: "
+                    f"found {len(valid_urls)} valid URLs "
                     f"(total: {len(all_urls)})"
                 )
 
@@ -109,7 +119,10 @@ class BaiduDownloader(BaseImageDownloader):
                 logger.error(f"Error fetching Baidu page {page + 1}: {e}")
                 # 继续尝试下一页，不中断整个流程
 
-        logger.info(f"Baidu pagination complete: {len(all_urls)} total unique URLs")
+        logger.info(
+            f"Baidu pagination complete: "
+            f"{len(all_urls)} total unique URLs"
+        )
         return all_urls
 
     async def _fetch_page(self, keyword: str, pn: int, count: int) -> List[str]:
@@ -128,30 +141,29 @@ class BaiduDownloader(BaseImageDownloader):
 
         try:
             # 构建请求参数
-            params = {
+            params: Dict[str, Any] = {
                 "tn": "baiduimage",
                 "word": keyword,
                 "pn": pn,
                 "rn": count,
             }
 
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
+            headers = {"User-Agent": self.USER_AGENT}
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     self.api_url,
                     params=params,
                     headers=headers,
-                    timeout=30
+                    timeout=aiohttp.ClientTimeout(total=self.REQUEST_TIMEOUT)
                 ) as response:
                     if response.status == 200:
                         json_data = await response.json()
                         urls = self._parse_image_urls_from_json(json_data)
                     else:
                         logger.warning(
-                            f"Baidu page pn={pn}: failed with status {response.status}"
+                            f"Baidu page pn={pn}: "
+                            f"failed with status {response.status}"
                         )
 
         except Exception as e:
@@ -172,7 +184,8 @@ class BaiduDownloader(BaseImageDownloader):
         urls = []
 
         try:
-            # Baidu JSON 格式: {"data": [{"thumbURL": "...", "middleURL": "...", "objURL": "..."}, ...]}
+            # Baidu JSON 格式:
+            # {"data": [{"thumbURL": "...", "middleURL": "...", "objURL": "..."}]}
             # objURL 通常是原始图片 URL
             data = json_data.get("data", [])
 

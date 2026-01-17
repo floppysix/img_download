@@ -91,7 +91,9 @@ async def test_baidu_search_non_200_status(mocker):
 
     mock_session = mocker.Mock()
     mock_session.get = mocker.AsyncMock(return_value=mock_response)
-    mock_session.get.return_value.__aenter__ = mocker.AsyncMock(return_value=mock_response)
+    mock_session.get.return_value.__aenter__ = mocker.AsyncMock(
+        return_value=mock_response
+    )
     mock_session.get.return_value.__aexit__ = mocker.AsyncMock()
 
     mocker.patch("aiohttp.ClientSession", return_value=mock_session)
@@ -324,7 +326,11 @@ async def test_search_with_pagination_max_pages_limit(mocker):
         # 每页返回不同的 URL
         page_call_count[0] += 1
         start_idx = (page_call_count[0] - 1) * 20
-        return [f"https://example.com/img{i}.jpg" for i in range(start_idx, start_idx + 20)]
+        url_list = [
+            f"https://example.com/img{i}.jpg"
+            for i in range(start_idx, start_idx + 20)
+        ]
+        return url_list
 
     async def mock_validate(urls):
         # 返回 15 个有效 URL (> 30%)
@@ -388,7 +394,10 @@ async def test_parse_image_urls_from_json():
             {"objURL": "https://example.com/obj1.jpg"},
             {"middleURL": "https://example.com/mid1.jpg"},
             {"thumbURL": "https://example.com/thumb1.jpg"},
-            {"objURL": "https://example.com/obj2.jpg", "middleURL": "https://example.com/mid2.jpg"},
+            {
+                "objURL": "https://example.com/obj2.jpg",
+                "middleURL": "https://example.com/mid2.jpg"
+            },
             # 没有 URL 的项应该被跳过
             {"objURL": ""},
             {"middleURL": None},
