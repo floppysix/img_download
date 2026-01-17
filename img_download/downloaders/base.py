@@ -23,10 +23,12 @@ class BaseImageDownloader(ABC):
         """
         pass
 
-    @abstractmethod
     async def search_with_pagination(self, keyword: str) -> Set[str]:
         """
         分页搜索，返回去重后的 URL 集合（新接口）
+
+        Default implementation raises NotImplementedError.
+        Concrete classes should override this method.
 
         Args:
             keyword: 搜索关键词
@@ -34,7 +36,7 @@ class BaseImageDownloader(ABC):
         Returns:
             去重后的图片 URL 集合
         """
-        pass
+        raise NotImplementedError(f"{self.__class__.__name__} must implement search_with_pagination()")
 
     async def _validate_urls(self, urls: List[str]) -> List[str]:
         """
