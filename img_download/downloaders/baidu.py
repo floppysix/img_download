@@ -1,5 +1,5 @@
 import asyncio
-from typing import List
+from typing import List, Set
 import aiohttp
 from selectolax.lexbor import LexborHTMLParser
 from .base import BaseImageDownloader
@@ -11,9 +11,15 @@ logger = setup_logger()
 class BaiduDownloader(BaseImageDownloader):
     """百度图片下载器 - 纯爬虫实现"""
 
+    # 分页配置参数
+    page_size = 20
+    max_pages = 20
+    max_empty_pages = 2
+
     def __init__(self):
         super().__init__("baidu")
         self.base_url = "https://image.baidu.com/search/index"
+        self.api_url = "https://image.baidu.com/search/acjson"
 
     async def search(self, keyword: str, count: int) -> List[str]:
         """
@@ -52,6 +58,136 @@ class BaiduDownloader(BaseImageDownloader):
 
         except Exception as e:
             logger.error(f"Baidu search error: {e}")
+
+        return urls
+
+    async def search_with_pagination(self, keyword: str) -> Set[str]:
+        """
+        分页搜索百度图片，返回去重后的 URL 集合
+
+        Args:
+            keyword: 搜索关键词
+
+        Returns:
+            去重后的图片 URL 集合
+        """
+        all_urls: Set[str] = set()
+        empty_count = 0
+
+        for page in range(self.max_pages):
+            pn = page * self.page_size
+
+            try:
+                # 获取单页数据
+                urls = await self._fetch_page(keyword, pn, self.page_size)
+
+                # 验证 URL
+                valid_urls = await self._validate_urls(urls)
+
+                # 停止检查
+                if len(valid_urls) == 0:
+                    empty_count += 1
+                    if empty_count >= self.max_empty_pages:
+                        break
+                    # 空页直接跳过，不添加也不继续
+                    continue
+                else:
+                    empty_count = 0
+
+                # 软性停止：结果数 < 30%
+                # 先添加结果，再判断是否停止
+                all_urls.update(valid_urls)
+                logger.info(
+                    f"Baidu page {page + 1}: found {len(valid_urls)} valid URLs "
+                    f"(total: {len(all_urls)})"
+                )
+
+                if len(valid_urls) < self.page_size * 0.3:
+                    break
+
+            except Exception as e:
+                logger.error(f"Error fetching Baidu page {page + 1}: {e}")
+                # 继续尝试下一页，不中断整个流程
+
+        logger.info(f"Baidu pagination complete: {len(all_urls)} total unique URLs")
+        return all_urls
+
+    async def _fetch_page(self, keyword: str, pn: int, count: int) -> List[str]:
+        """
+        获取单页图片 URL
+
+        Args:
+            keyword: 搜索关键词
+            pn: 起始位置偏移量（0, 20, 40, ...）
+            count: 请求的数量
+
+        Returns:
+            图片 URL 列表
+        """
+        urls = []
+
+        try:
+            # 构建请求参数
+            params = {
+                "tn": "baiduimage",
+                "word": keyword,
+                "pn": pn,
+                "rn": count,
+            }
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    self.api_url,
+                    params=params,
+                    headers=headers,
+                    timeout=30
+                ) as response:
+                    if response.status == 200:
+                        json_data = await response.json()
+                        urls = self._parse_image_urls_from_json(json_data)
+                    else:
+                        logger.warning(
+                            f"Baidu page pn={pn}: failed with status {response.status}"
+                        )
+
+        except Exception as e:
+            logger.error(f"Error fetching Baidu page (pn={pn}): {e}")
+
+        return urls
+
+    def _parse_image_urls_from_json(self, json_data: dict) -> List[str]:
+        """
+        从 JSON 响应中解析图片 URL
+
+        Args:
+            json_data: Baidu API 返回的 JSON 数据
+
+        Returns:
+            图片 URL 列表
+        """
+        urls = []
+
+        try:
+            # Baidu JSON 格式: {"data": [{"thumbURL": "...", "middleURL": "...", "objURL": "..."}, ...]}
+            # objURL 通常是原始图片 URL
+            data = json_data.get("data", [])
+
+            for item in data:
+                # 优先使用 objURL (原始图片)，其次 middleURL，最后 thumbURL
+                obj_url = item.get("objURL")
+                middle_url = item.get("middleURL")
+                thumb_url = item.get("thumbURL")
+
+                url = obj_url or middle_url or thumb_url
+                if url and url.startswith("http"):
+                    urls.append(url)
+
+        except Exception as e:
+            logger.error(f"Error parsing JSON: {e}")
 
         return urls
 
