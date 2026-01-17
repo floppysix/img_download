@@ -253,6 +253,11 @@ class GoogleDownloader(BaseImageDownloader, SeleniumMixin):
         """
         从页面提取图片 URL（Selenium 用）
 
+        Google Images 使用三重提取策略：
+        1. data-url 属性（直接图片 URL）
+        2. JSON 格式 "ou":"..."（直接图片 URL）
+        3. src/data-src（代理 URL，仅在前两者失败时使用）
+
         Args:
             driver: Selenium WebDriver 实例
 
@@ -261,9 +266,10 @@ class GoogleDownloader(BaseImageDownloader, SeleniumMixin):
         """
         from selenium.webdriver.common.by import By
 
-        urls = set()  # 使用 set 自动去重
+        direct_urls = set()  # 直接图片 URL
+        proxy_urls = set()   # 代理 URL
 
-        # 策略 1: Google 的 data-url 属性
+        # 策略 1: Google 的 data-url 属性（直接 URL，优先）
         try:
             img_elements = driver.find_elements(
                 By.CSS_SELECTOR,
@@ -272,31 +278,42 @@ class GoogleDownloader(BaseImageDownloader, SeleniumMixin):
             for img in img_elements:
                 url = img.get_attribute("data-url")
                 if url and url.startswith("http"):
-                    urls.add(url)
+                    direct_urls.add(url)
         except Exception:
             pass
 
-        # 策略 2: 常规 src/data-src
-        try:
-            all_images = driver.find_elements(By.TAG_NAME, "img")
-            for img in all_images:
-                for attr in ["src", "data-src"]:
-                    url = img.get_attribute(attr)
-                    if (url and url.startswith("http") and
-                        "logo" not in url.lower()):
-                        urls.add(url)
-        except Exception:
-            pass
-
-        # 策略 3: 页面中的 JSON 格式
+        # 策略 2: 页面中的 JSON 格式（直接 URL，优先）
         try:
             page_source = driver.page_source
             pattern = r'"ou":"([^"]+)"'
             matches = re.findall(pattern, page_source)
             for match in matches:
                 if match.startswith("http"):
-                    urls.add(match)
+                    direct_urls.add(match)
         except Exception:
             pass
 
-        return list(urls)
+        # 策略 3: 常规 src/data-src（代理 URL，备用）
+        # 只在没有直接 URL 时使用
+        if not direct_urls:
+            try:
+                all_images = driver.find_elements(By.TAG_NAME, "img")
+                for img in all_images:
+                    for attr in ["src", "data-src"]:
+                        url = img.get_attribute(attr)
+                        # 过滤掉 Google 的 logo、图标和代理 URL
+                        if (url and url.startswith("http") and
+                            "logo" not in url.lower() and
+                            "gstatic.com" not in url and  # 排除代理 URL
+                            "favicon" not in url.lower()):
+                            proxy_urls.add(url)
+            except Exception:
+                pass
+
+        # 优先返回直接 URL，如果没有则使用代理 URL
+        result = list(direct_urls) if direct_urls else list(proxy_urls)
+        logger.info(
+            f"Google Selenium: extracted {len(result)} URLs "
+            f"({len(direct_urls)} direct, {len(proxy_urls)} proxy)"
+        )
+        return result
