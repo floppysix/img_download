@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import aiohttp
-from .downloaders import BingDownloader, GoogleDownloader
+from .downloaders import BingDownloader, GoogleDownloader, BaiduDownloader
 from .utils import download_image
 from .logger import setup_logger
 
@@ -17,6 +17,7 @@ class ImageDownloader:
         self.max_concurrent = max_concurrent
         self.downloaders = {
             "bing": BingDownloader(),
+            "baidu": BaiduDownloader(),
             "google": GoogleDownloader(),
         }
 
