@@ -62,7 +62,6 @@ class ImageDownloader:
             "total": count,
             "success": stats["success"],
             "failed": stats["failed"],
-            "sources": stats.get("sources", {}),
             "path": str(keyword_dir)
         }
 
@@ -79,21 +78,18 @@ class ImageDownloader:
         # 创建信号量控制并发数
         semaphore = asyncio.Semaphore(self.max_concurrent)
 
-        async def download_with_semaphore(url: str, index: int) -> bool:
-            async with semaphore:
-                # 生成文件名：{来源序号}_{原始文件名}
-                ext = self._get_extension(url)
-                filename = f"bing_{index:03d}{ext}"
-                save_path = save_dir / filename
-                return await download_image(url, save_path, session)
-
         async with aiohttp.ClientSession() as session:
             # 绑定 session 到 download_image
             tasks = []
             for i, url in enumerate(urls):
                 # 创建闭包捕获正确的 url 和 session
                 async def bound_download(u=url, idx=i):
-                    return await download_image(u, save_dir / f"bing_{idx:03d}.jpg", session)
+                    async with semaphore:
+                        # 使用实际文件扩展名
+                        ext = self._get_extension(u)
+                        filename = f"img_{idx:03d}{ext}"
+                        save_path = save_dir / filename
+                        return await download_image(u, save_path, session)
 
                 tasks.append(bound_download())
 
@@ -110,8 +106,7 @@ class ImageDownloader:
 
         return {
             "success": success_count,
-            "failed": failed_count,
-            "sources": {}
+            "failed": failed_count
         }
 
     def _get_extension(self, url: str) -> str:
