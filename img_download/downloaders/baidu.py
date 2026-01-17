@@ -82,18 +82,29 @@ class BaiduDownloader(BaseImageDownloader, SeleniumMixin):
         Returns:
             去重后的图片 URL 集合
         """
+        # 重置已收集的 URL（重要：每次搜索都要重置）
+        self._collected_urls = set()
+
         all_urls: Set[str] = set()
         empty_count = 0
+
+        logger.info(f"[DEBUG] Starting pagination for keyword '{keyword}', max_pages={self.max_pages}")
 
         for page in range(self.max_pages):
             pn = page * self.page_size
 
             try:
                 # 获取单页数据
+                logger.info(f"[DEBUG] Page {page + 1}: fetching URLs...")
                 urls = await self._fetch_page(keyword, pn, self.page_size)
+                logger.info(f"[DEBUG] Page {page + 1}: fetched {len(urls)} raw URLs")
+
+                if urls:
+                    logger.info(f"[DEBUG] Page {page + 1}: first 3 URLs: {urls[:3]}")
 
                 # 验证 URL
                 valid_urls = await self._validate_urls(urls)
+                logger.info(f"[DEBUG] Page {page + 1}: {len(valid_urls)} URLs passed validation")
 
                 # 停止检查
                 if len(valid_urls) == 0:
@@ -279,6 +290,8 @@ class BaiduDownloader(BaseImageDownloader, SeleniumMixin):
         """
         从页面提取图片 URL（Selenium 用）
 
+        不限制返回数量，由 max_total_images 控制上限
+
         Args:
             driver: Selenium WebDriver 实例
 
@@ -286,12 +299,17 @@ class BaiduDownloader(BaseImageDownloader, SeleniumMixin):
             图片 URL 列表
         """
         from selenium.webdriver.common.by import By
+        import time
 
         urls = set()  # 使用 set 自动去重
 
         try:
+            # 等待页面加载完成（重要：给图片加载时间）
+            time.sleep(2)
+
             # 方法 1: 提取所有 img[src]，直接使用 src 属性
             img_elements = driver.find_elements(By.TAG_NAME, "img")
+            logger.info(f"[DEBUG] Selenium found {len(img_elements)} img elements on page")
 
             for img in img_elements:
                 try:
@@ -300,11 +318,20 @@ class BaiduDownloader(BaseImageDownloader, SeleniumMixin):
                     if (src and src.startswith("http") and
                         "baidu.com/img/flexible/logo" not in src and
                         "data:image" not in src):  # 排除 base64 图片
+                        # 检查是否已达到上限
+                        if len(self._collected_urls) >= self.max_total_images:
+                            break
                         urls.add(src)
+                        self._collected_urls.add(src)
                 except:
                     pass
 
         except Exception as e:
             logger.warning(f"Error extracting URLs with Selenium: {e}")
 
-        return list(urls)
+        result = list(urls)
+        logger.info(
+            f"Baidu Selenium: extracted {len(result)} URLs "
+            f"(total collected: {len(self._collected_urls)}/{self.max_total_images})"
+        )
+        return result

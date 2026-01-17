@@ -12,15 +12,18 @@ logger = setup_logger()
 class SeleniumMixin:
     """Selenium 功能混入类，为下载器提供备用方案"""
 
-    # Selenium 配置
+    # Selenium 配置（优化版）
     selenium_enabled = True
     page_load_timeout = 30
-    scroll_pause_time = 2
-    max_scroll_attempts = 10
+    scroll_pause_time = 1  # 减少等待时间：2秒 → 1秒
+    max_scroll_attempts = 5  # 限制滚动次数：100 → 5次（性能优化）
+    max_total_images = 2000  # 每个来源最多收集的图片数
+    empty_scroll_tolerance = 2  # 连续 N 次滚动无新内容时停止：3 → 2
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._browser_manager = BrowserManager()
+        self._collected_urls = set()  # 跟踪已收集的 URL
 
     def set_headless(self, headless: bool):
         """设置无头模式"""
@@ -109,9 +112,11 @@ class SeleniumMixin:
 
     def _load_more_content(self, driver) -> None:
         """
-        混合加载策略：滚动 + 按钮
+        改进的滚动加载策略：滚动直到没有新内容或达到上限
 
-        先尝试滚动加载更多内容，如果没有新内容则尝试点击"加载更多"按钮
+        停止条件：
+        1. 连续 N 次滚动没有增加图片数量
+        2. 达到 max_total_images 上限
 
         Args:
             driver: Selenium WebDriver 实例
@@ -121,6 +126,7 @@ class SeleniumMixin:
         from selenium.webdriver.common.by import By
 
         urls_count = 0
+        empty_count = 0  # 连续无新内容的次数
 
         # 等待页面加载至少有一些图片
         try:
@@ -130,7 +136,14 @@ class SeleniumMixin:
         except:
             pass  # 即使没有图片也继续
 
-        for _ in range(self.max_scroll_attempts):
+        for attempt in range(self.max_scroll_attempts):
+            # 检查是否已达到上限
+            if len(self._collected_urls) >= self.max_total_images:
+                logger.info(
+                    f"Reached max_total_images limit ({self.max_total_images}), stopping scroll"
+                )
+                break
+
             # 1. 滚动到页面底部
             driver.execute_script(
                 "window.scrollTo(0, document.body.scrollHeight);"
@@ -144,10 +157,21 @@ class SeleniumMixin:
                 current_urls = urls_count
 
             if current_urls == urls_count:
-                # 没有新内容，尝试找"加载更多"按钮
-                if not self._try_click_load_more(driver):
-                    break  # 没有按钮了，结束
-            urls_count = current_urls
+                # 没有新内容
+                empty_count += 1
+                if empty_count >= self.empty_scroll_tolerance:
+                    # 尝试找"加载更多"按钮
+                    if not self._try_click_load_more(driver):
+                        logger.info(
+                            f"No new content after {self.empty_scroll_tolerance} scrolls, stopping"
+                        )
+                        break  # 没有按钮了，结束
+                    else:
+                        empty_count = 0  # 点击了按钮，重置计数
+            else:
+                # 有新内容，重置空计数
+                empty_count = 0
+                urls_count = current_urls
 
     def _try_click_load_more(self, driver) -> bool:
         """

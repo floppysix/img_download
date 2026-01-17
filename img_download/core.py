@@ -16,22 +16,28 @@ class ImageDownloader:
     def __init__(
         self,
         output_dir: str = "output",
-        max_concurrent: int = 10,
+        max_concurrent: int = 25,
         selenium_enabled: bool = True,
-        headless: bool = True
+        headless: bool = True,
+        verbose: bool = True,
+        max_total_images: int = 2000
     ):
         """
         初始化图片下载器
 
         Args:
             output_dir: 输出目录
-            max_concurrent: 最大并发下载数
+            max_concurrent: 最大并发下载数（默认 25）
             selenium_enabled: 是否启用 Selenium
             headless: 是否使用无头模式
+            verbose: 是否显示详细日志（True=每张图片，False=进度摘要）
+            max_total_images: 每个来源最多收集的图片数（默认 2000）
         """
         self.output_dir = Path(output_dir)
         self.max_concurrent = max_concurrent
         self.selenium_enabled = selenium_enabled
+        self.verbose = verbose
+        self.max_total_images = max_total_images
 
         # 初始化下载器
         self.downloaders = {
@@ -39,6 +45,11 @@ class ImageDownloader:
             "baidu": BaiduDownloader(),
             "google": GoogleDownloader(),
         }
+
+        # 配置每个下载器的 max_total_images
+        for downloader in self.downloaders.values():
+            if hasattr(downloader, "max_total_images"):
+                downloader.max_total_images = max_total_images
 
         # 配置 Selenium
         if self.selenium_enabled:
@@ -207,6 +218,10 @@ class ImageDownloader:
         source_stats = {}
         download_records = []
 
+        # 进度追踪（用于非详细模式）
+        completed_count = [0]  # 使用列表以在闭包中修改
+        progress_interval = 100
+
         # 创建信号量控制并发数
         semaphore = asyncio.Semaphore(self.max_concurrent)
 
@@ -233,8 +248,20 @@ class ImageDownloader:
                         filename = f"{keyword}_{i + 1}{ext}"
                         save_path = save_dir / filename
 
-                        # 下载
-                        result = await download_image(u, save_path, session)
+                        # 下载（传递 verbose 参数）
+                        result = await download_image(
+                            u, save_path, session,
+                            verbose=self.verbose
+                        )
+
+                        # 进度报告（非详细模式）
+                        if not self.verbose:
+                            completed_count[0] += 1
+                            if completed_count[0] % progress_interval == 0:
+                                logger.info(
+                                    f"Download progress: {completed_count[0]}/{len(url_sources)} "
+                                    f"({completed_count[0] * 100 // len(url_sources)}%)"
+                                )
 
                         # 记录下载信息
                         record = {

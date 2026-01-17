@@ -44,7 +44,7 @@ class BaseImageDownloader(ABC):
 
     async def _validate_urls(self, urls: List[str]) -> List[str]:
         """
-        验证 URL 有效性（HEAD 请求）
+        验证 URL 有效性（GET 请求 + 宽松验证）
 
         Args:
             urls: 待验证的 URL 列表
@@ -54,30 +54,43 @@ class BaseImageDownloader(ABC):
         """
         logger = setup_logger()
         valid_urls = []
-        semaphore = asyncio.Semaphore(10)  # 10 并发验证
+        semaphore = asyncio.Semaphore(20)  # 提高并发到 20
 
-        async def check(url: str) -> bool:
-            try:
-                async with semaphore:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.head(
-                            url, timeout=aiohttp.ClientTimeout(total=10)
+        # 复用 ClientSession（关键优化）
+        async with aiohttp.ClientSession() as session:
+            async def check(url: str) -> bool:
+                try:
+                    async with semaphore:
+                        # 使用 GET 请求而不是 HEAD（HEAD 经常被拒绝）
+                        # 只请求前 1KB 数据来验证
+                        async with session.get(
+                            url,
+                            timeout=aiohttp.ClientTimeout(total=5),
+                            headers={"Range": "bytes=0-1023"}  # 只请求前 1KB
                         ) as resp:
-                            return resp.status == 200 and self._is_image(resp)
-            except Exception:
-                return False
+                            # 接受 200 (OK) 和 206 (Partial Content，由于 Range 请求)
+                            if resp.status in (200, 206):
+                                # 宽松验证：有 Content-Type 或者 URL 看起来像图片
+                                ct = resp.headers.get('Content-Type', '')
+                                if ct.startswith('image/'):
+                                    return True
+                                # 如果没有 Content-Type，检查 URL 扩展名
+                                url_lower = url.lower()
+                                if any(ext in url_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']):
+                                    return True
+                            return False
+                except Exception as e:
+                    # 静默失败，不打印每个错误
+                    return False
 
-        results = await asyncio.gather(*[check(u) for u in urls])
+            results = await asyncio.gather(*[check(u) for u in urls])
 
         for url, is_valid in zip(urls, results):
             if is_valid:
                 valid_urls.append(url)
-            else:
-                logger.warning(f"Validation failed: {url[:60]}...")
 
-        # 失败率监控
-        if len(valid_urls) < len(urls) * 0.5:
-            logger.warning(f"High failure rate: {len(valid_urls)}/{len(urls)}")
+        # 只打印汇总信息
+        logger.info(f"Validation: {len(valid_urls)}/{len(urls)} URLs passed")
 
         return valid_urls
 

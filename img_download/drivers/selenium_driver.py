@@ -55,25 +55,63 @@ class BrowserManager:
                 )
                 self._driver.set_page_load_timeout(30)
 
+                # 关键：隐藏 navigator.webdriver 标志
+                # 这会修改 JavaScript 的 navigator 属性，使 webdriver 属性返回 undefined
+                self._driver.execute_cdp_cmd(
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {
+                        "source": """
+                            Object.defineProperty(navigator, 'webdriver', {
+                                get: () => undefined
+                            });
+                            // 也可以修改 chrome 对象
+                            window.chrome = {
+                                runtime: {}
+                            };
+                            // 修改 permissions
+                            const originalQuery = window.navigator.permissions.query;
+                            window.navigator.permissions.query = (parameters) => (
+                                parameters.name === 'notifications' ?
+                                    Promise.resolve({ state: Notification.permission }) :
+                                    originalQuery(parameters)
+                            );
+                        """
+                    },
+                )
+
             self._last_used = self._get_time()
             return self._driver
 
     def _create_options(self) -> Options:
-        """创建 Chrome 选项（推荐配置）"""
+        """创建 Chrome 选项（推荐配置 + 反自动化检测）"""
         options = Options()
 
         # 无头模式
         if self._headless:
-            options.add_argument("--headless")
+            options.add_argument("--headless=new")  # 使用新版无头模式
 
         # 性能优化
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--blink-settings=imagesEnabled=false")
 
         # 窗口大小
         options.add_argument("--window-size=1920,1080")
+
+        # 反自动化检测（防止 Google 等网站检测到 Selenium）
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option("useAutomationExtension", False)
+
+        # 设置更真实的 User-Agent
+        options.add_argument(
+            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        )
+
+        # 禁用 WebDriver 标志（通过执行脚本）
+        # 注意：这会在 driver 创建后执行
 
         return options
 

@@ -11,7 +11,8 @@ async def download_image(
     url: str,
     save_path: Path,
     session: aiohttp.ClientSession,
-    timeout: int = 30
+    timeout: int = 12,
+    verbose: bool = True
 ) -> bool:
     """
     下载单张图片
@@ -20,7 +21,8 @@ async def download_image(
         url: 图片 URL
         save_path: 保存路径
         session: aiohttp 会话
-        timeout: 超时时间（秒）
+        timeout: 超时时间（秒，默认 12）
+        verbose: 是否打印详细日志（默认 True）
 
     Returns:
         是否下载成功
@@ -32,14 +34,18 @@ async def download_image(
                 save_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(save_path, "wb") as f:
                     f.write(content)
-                logger.info(f"Downloaded: {save_path}")
+                if verbose:
+                    logger.info(f"Downloaded: {save_path}")
                 return True
             else:
-                logger.warning(f"Failed {url}: status {response.status}")
+                if verbose:
+                    logger.warning(f"Failed {url}: status {response.status}")
                 return False
     except asyncio.TimeoutError:
-        logger.warning(f"Timeout: {url}")
+        if verbose:
+            logger.warning(f"Timeout: {url}")
         return False
     except Exception as e:
-        logger.warning(f"Error downloading {url}: {e}")
+        if verbose:
+            logger.warning(f"Error downloading {url}: {e}")
         return False

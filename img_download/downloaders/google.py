@@ -260,6 +260,8 @@ class GoogleDownloader(BaseImageDownloader, SeleniumMixin):
         3. JSON 格式中的 URL
         4. src/data-src（代理 URL，最后备用）
 
+        不限制返回数量，由 max_total_images 控制上限
+
         Args:
             driver: Selenium WebDriver 实例
 
@@ -271,83 +273,102 @@ class GoogleDownloader(BaseImageDownloader, SeleniumMixin):
         direct_urls = set()  # 直接图片 URL
         proxy_urls = set()   # 代理 URL
 
+        def can_add_more() -> bool:
+            """检查是否还可以添加更多 URL"""
+            return len(self._collected_urls) < self.max_total_images
+
         # 策略 1: 点击第一张图片来触发加载原始 URL
         try:
-            first_img = driver.find_element(
-                By.CSS_SELECTOR,
-                "img[src^='https://encrypted-tbn0.gstatic.com']"
-            )
-            driver.execute_script("arguments[0].scrollIntoView();", first_img)
-            driver.execute_script("arguments[0].click();", first_img)
-            time.sleep(2)
+            if can_add_more():
+                first_img = driver.find_element(
+                    By.CSS_SELECTOR,
+                    "img[src^='https://encrypted-tbn0.gstatic.com']"
+                )
+                driver.execute_script("arguments[0].scrollIntoView();", first_img)
+                driver.execute_script("arguments[0].click();", first_img)
+                time.sleep(2)
 
-            # 从更新后的页面源码中提取直接 URL
-            page_source = driver.page_source
+                # 从更新后的页面源码中提取直接 URL
+                page_source = driver.page_source
 
-            # 查找所有 http/https URL，过滤出图片 URL
-            all_urls = re.findall(r'https?://[^\s"<>{}|\\^`\[\]]+', page_source)
-            for url in all_urls:
-                # 过滤出真正的图片 URL
-                if (url.startswith("http") and
-                    'encrypted-tbn0' not in url and
-                    'gstatic.com' not in url and
-                    'google.com' not in url and
-                    'googleapis.com' not in url and
-                    'favicon' not in url.lower() and
-                    len(url) > 30):
-                    # 检查是否包含图片文件扩展名或常见图片域名
-                    if any(ext in url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg']):
-                        direct_urls.add(url)
-                    elif any(domain in url for domain in [
-                        'wikimedia', 'shutterstock', 'istockphoto', 'getty',
-                        'images.', 'img.', 'photos.', 'media.',
-                        'upload.', 'cdn.', 'static.'
-                    ]):
-                        direct_urls.add(url)
+                # 查找所有 http/https URL，过滤出图片 URL
+                all_urls = re.findall(r'https?://[^\s"<>{}|\\^`\[\]]+', page_source)
+                for url in all_urls:
+                    if not can_add_more():
+                        break
+                    # 过滤出真正的图片 URL
+                    if (url.startswith("http") and
+                        'encrypted-tbn0' not in url and
+                        'gstatic.com' not in url and
+                        'google.com' not in url and
+                        'googleapis.com' not in url and
+                        'favicon' not in url.lower() and
+                        len(url) > 30):
+                        # 检查是否包含图片文件扩展名或常见图片域名
+                        if any(ext in url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg']):
+                            direct_urls.add(url)
+                            self._collected_urls.add(url)
+                        elif any(domain in url for domain in [
+                            'wikimedia', 'shutterstock', 'istockphoto', 'getty',
+                            'images.', 'img.', 'photos.', 'media.',
+                            'upload.', 'cdn.', 'static.'
+                        ]):
+                            direct_urls.add(url)
+                            self._collected_urls.add(url)
 
         except Exception as e:
             pass  # 点击失败，继续使用其他策略
 
         # 策略 2: Google 的 data-url 属性
-        try:
-            img_elements = driver.find_elements(
-                By.CSS_SELECTOR,
-                "img[data-url]"
-            )
-            for img in img_elements:
-                url = img.get_attribute("data-url")
-                if url and url.startswith("http"):
-                    direct_urls.add(url)
-        except Exception:
-            pass
+        if can_add_more():
+            try:
+                img_elements = driver.find_elements(
+                    By.CSS_SELECTOR,
+                    "img[data-url]"
+                )
+                for img in img_elements:
+                    if not can_add_more():
+                        break
+                    url = img.get_attribute("data-url")
+                    if url and url.startswith("http"):
+                        direct_urls.add(url)
+                        self._collected_urls.add(url)
+            except Exception:
+                pass
 
         # 策略 3: 页面中的 JSON 格式
-        try:
-            page_source = driver.page_source
-            patterns = [
-                r'"ou":"([^"]+)"',
-                r"'ou':\s*'([^']+)'",
-                r'"ou":"([^"]+)"',
-            ]
-            for pattern in patterns:
-                matches = re.findall(pattern, page_source)
-                for match in matches:
-                    if match.startswith("http") and 'google' not in match:
-                        direct_urls.add(match)
-        except Exception:
-            pass
+        if can_add_more():
+            try:
+                page_source = driver.page_source
+                patterns = [
+                    r'"ou":"([^"]+)"',
+                    r"'ou':\s*'([^']+)'",
+                ]
+                for pattern in patterns:
+                    matches = re.findall(pattern, page_source)
+                    for match in matches:
+                        if not can_add_more():
+                            break
+                        if match.startswith("http") and 'google' not in match:
+                            direct_urls.add(match)
+                            self._collected_urls.add(match)
+            except Exception:
+                pass
 
         # 策略 4: 常规 src/data-src（代理 URL，备用）
-        if not direct_urls:
+        if not direct_urls and can_add_more():
             try:
                 all_images = driver.find_elements(By.TAG_NAME, "img")
                 for img in all_images:
+                    if not can_add_more():
+                        break
                     for attr in ["src", "data-src"]:
                         url = img.get_attribute(attr)
                         # 只收集 Google 代理 URL（缩略图）
                         if (url and url.startswith("http") and
                             "encrypted-tbn0.gstatic.com" in url):
                             proxy_urls.add(url)
+                            self._collected_urls.add(url)
             except Exception:
                 pass
 
@@ -355,6 +376,7 @@ class GoogleDownloader(BaseImageDownloader, SeleniumMixin):
         result = list(direct_urls) if direct_urls else list(proxy_urls)
         logger.info(
             f"Google Selenium: extracted {len(result)} URLs "
-            f"({len(direct_urls)} direct, {len(proxy_urls)} proxy)"
+            f"({len(direct_urls)} direct, {len(proxy_urls)} proxy) "
+            f"[total collected: {len(self._collected_urls)}/{self.max_total_images}]"
         )
         return result

@@ -1,4 +1,5 @@
 from typing import List, Set
+import asyncio
 import aiohttp
 import re
 import html
@@ -9,7 +10,7 @@ logger = setup_logger()
 
 
 class BingDownloader(BaseImageDownloader):
-    """Bing 图片下载器"""
+    """Bing 图片下载器 - 纯 aiohttp 实现"""
 
     # 分页配置参数
     page_size = 35
@@ -19,7 +20,8 @@ class BingDownloader(BaseImageDownloader):
     def __init__(self):
         super().__init__("bing")
         self.base_url = "https://www.bing.com/images/async"
-        self.request_timeout = 60  # 增加到 60 秒
+        self.request_timeout = 30  # 单次请求超时 30 秒
+        self.max_retries = 3  # 最大重试次数
 
     async def search(self, keyword: str, count: int) -> List[str]:
         """
@@ -116,7 +118,7 @@ class BingDownloader(BaseImageDownloader):
 
     async def _fetch_page(self, keyword: str, first: int, count: int) -> List[str]:
         """
-        获取单页图片 URL
+        获取单页图片 URL（带重试机制）
 
         Args:
             keyword: 搜索关键词
@@ -128,44 +130,55 @@ class BingDownloader(BaseImageDownloader):
         """
         urls = []
 
-        try:
-            # 构建请求参数
-            params = {
-                "q": keyword,
-                "first": first,
-                "count": count,
-            }
+        # 重试机制
+        for attempt in range(self.max_retries):
+            try:
+                # 构建请求参数
+                params = {
+                    "q": keyword,
+                    "first": first,
+                    "count": count,
+                }
 
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
 
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    self.base_url,
-                    params=params,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=self.request_timeout)
-                ) as response:
-                    if response.status == 200:
-                        html_content = await response.text()
-                        urls = self._parse_image_urls(html_content)
-                    else:
-                        logger.warning(
-                            f"Bing page {first}: failed with status {response.status}"
-                        )
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        self.base_url,
+                        params=params,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=self.request_timeout)
+                    ) as response:
+                        if response.status == 200:
+                            html_content = await response.text()
+                            urls = self._parse_image_urls(html_content)
+                            if urls:  # 如果成功获取到 URL，直接返回
+                                return urls
+                            else:  # 状态码 200 但没有 URL，可能是空页
+                                logger.info(f"Bing page {first}: no URLs found (empty page)")
+                                return []
+                        else:
+                            logger.warning(
+                                f"Bing page {first}: failed with status {response.status}"
+                            )
+                            if attempt < self.max_retries - 1:
+                                await asyncio.sleep(1 * (attempt + 1))  # 指数退避
 
-        except Exception as e:
-            # 详细的错误日志
-            error_msg = str(e) if str(e) else type(e).__name__
-            logger.error(
-                f"Error fetching Bing page (first={first}): {error_msg}"
-            )
-            # 如果是空错误，打印完整异常信息用于调试
-            if not str(e):
-                import traceback
-                logger.error(f"Full exception info: {type(e).__name__}")
-                logger.error(f"Exception attributes: {dir(e)}")
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Bing page {first}: timeout (attempt {attempt + 1}/{self.max_retries})"
+                )
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(2 * (attempt + 1))  # 指数退避
+            except Exception as e:
+                error_msg = str(e) if str(e) else type(e).__name__
+                logger.error(
+                    f"Bing page {first}: error (attempt {attempt + 1}/{self.max_retries}): {error_msg}"
+                )
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(1 * (attempt + 1))  # 指数退避
 
         return urls
 
@@ -188,3 +201,66 @@ class BingDownloader(BaseImageDownloader):
             logger.error(f"Error parsing HTML: {e}")
 
         return urls
+
+    # ========== Selenium 相关方法 ==========
+
+    def _build_selenium_url(self, keyword: str, page: int) -> str:
+        """
+        构建 Bing 搜索 URL（Selenium 用）
+
+        Args:
+            keyword: 搜索关键词
+            page: 页码
+
+        Returns:
+            Bing 图片搜索 URL
+        """
+        return (
+            f"https://www.bing.com/images/async"
+            f"?q={keyword}&async=content&first=1"
+        )
+
+    def _extract_image_urls(self, driver) -> List[str]:
+        """
+        从页面提取图片 URL（Selenium 用）
+
+        不限制返回数量，由 max_total_images 控制上限
+
+        Args:
+            driver: Selenium WebDriver 实例
+
+        Returns:
+            图片 URL 列表
+        """
+        from selenium.webdriver.common.by import By
+
+        urls = set()
+
+        try:
+            # Bing 的图片 URL 通常在 img 标签的 src 属性中
+            img_elements = driver.find_elements(By.TAG_NAME, "img")
+
+            for img in img_elements:
+                try:
+                    src = img.get_attribute("src")
+                    # 过滤掉 Bing 的 logo 和小图标
+                    if (src and src.startswith("http") and
+                        "bing.com" not in src and  # 排除 Bing 自身资源
+                        "data:image" not in src):
+                        # 检查是否已达到上限
+                        if len(self._collected_urls) >= self.max_total_images:
+                            break
+                        urls.add(src)
+                        self._collected_urls.add(src)
+                except:
+                    pass
+
+        except Exception as e:
+            logger.warning(f"Error extracting URLs with Selenium: {e}")
+
+        result = list(urls)
+        logger.info(
+            f"Bing Selenium: extracted {len(result)} URLs "
+            f"(total collected: {len(self._collected_urls)}/{self.max_total_images})"
+        )
+        return result
