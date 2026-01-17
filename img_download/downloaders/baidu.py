@@ -148,7 +148,12 @@ class BaiduDownloader(BaseImageDownloader):
                 "rn": count,
             }
 
-            headers = {"User-Agent": self.USER_AGENT}
+            headers = {
+                "User-Agent": self.USER_AGENT,
+                "Referer": "https://image.baidu.com/",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            }
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(
