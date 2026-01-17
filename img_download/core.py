@@ -1,6 +1,9 @@
+import asyncio
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import aiohttp
 from .downloaders import BingDownloader
+from .utils import download_image
 from .logger import setup_logger
 
 logger = setup_logger()
@@ -9,8 +12,9 @@ logger = setup_logger()
 class ImageDownloader:
     """图片搜索与下载调度器"""
 
-    def __init__(self, output_dir: str = "output"):
+    def __init__(self, output_dir: str = "output", max_concurrent: int = 10):
         self.output_dir = Path(output_dir)
+        self.max_concurrent = max_concurrent
         self.downloaders = {
             "bing": BingDownloader(),
         }
@@ -41,17 +45,79 @@ class ImageDownloader:
 
         logger.info(f"Starting search for '{keyword}', count: {count}, sources: {sources}")
 
-        # 简化版：先只获取 URL，不实际下载
+        # 获取图片 URL
         all_urls = []
         for source in sources:
             if source in self.downloaders:
                 urls = await self.downloaders[source].search(keyword, count)
                 all_urls.extend(urls)
 
+        # 限制数量
+        all_urls = all_urls[:count]
+
+        # 并发下载
+        stats = await self._download_concurrent(keyword, keyword_dir, all_urls)
+
         return {
             "total": count,
-            "success": len(all_urls),
-            "failed": count - len(all_urls),
-            "sources": {},
+            "success": stats["success"],
+            "failed": stats["failed"],
+            "sources": stats.get("sources", {}),
             "path": str(keyword_dir)
         }
+
+    async def _download_concurrent(
+        self,
+        keyword: str,
+        save_dir: Path,
+        urls: List[str]
+    ) -> Dict[str, Any]:
+        """并发下载图片"""
+        success_count = 0
+        failed_count = 0
+
+        # 创建信号量控制并发数
+        semaphore = asyncio.Semaphore(self.max_concurrent)
+
+        async def download_with_semaphore(url: str, index: int) -> bool:
+            async with semaphore:
+                # 生成文件名：{来源序号}_{原始文件名}
+                ext = self._get_extension(url)
+                filename = f"bing_{index:03d}{ext}"
+                save_path = save_dir / filename
+                return await download_image(url, save_path, session)
+
+        async with aiohttp.ClientSession() as session:
+            # 绑定 session 到 download_image
+            tasks = []
+            for i, url in enumerate(urls):
+                # 创建闭包捕获正确的 url 和 session
+                async def bound_download(u=url, idx=i):
+                    return await download_image(u, save_dir / f"bing_{idx:03d}.jpg", session)
+
+                tasks.append(bound_download())
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, bool):
+                    if result:
+                        success_count += 1
+                    else:
+                        failed_count += 1
+                else:
+                    failed_count += 1
+
+        return {
+            "success": success_count,
+            "failed": failed_count,
+            "sources": {}
+        }
+
+    def _get_extension(self, url: str) -> str:
+        """从 URL 获取文件扩展名"""
+        url_lower = url.lower()
+        for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]:
+            if ext in url_lower:
+                return ext
+        return ".jpg"
