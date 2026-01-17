@@ -240,9 +240,9 @@ async def test_search_with_pagination_source_tracking(tmp_path, mocker):
 @pytest.mark.asyncio
 async def test_search_with_pagination_not_implemented(tmp_path, mocker):
     """Test graceful handling of downloaders that don't implement pagination"""
-    # Mock Google downloader to raise NotImplementedError
+    # Mock Google and Baidu downloaders to raise NotImplementedError
     async def mock_not_implemented(keyword: str) -> Set[str]:
-        raise NotImplementedError("Google does not implement pagination")
+        raise NotImplementedError("Does not implement pagination")
 
     # Mock Bing to work normally
     async def mock_bing_pagination(keyword: str) -> Set[str]:
@@ -251,6 +251,11 @@ async def test_search_with_pagination_not_implemented(tmp_path, mocker):
             "http://example.com/bing2.jpg",
         }
 
+    mocker.patch(
+        "img_download.downloaders.baidu."
+        "BaiduDownloader.search_with_pagination",
+        side_effect=mock_not_implemented
+    )
     mocker.patch(
         "img_download.downloaders.google."
         "GoogleDownloader.search_with_pagination",
