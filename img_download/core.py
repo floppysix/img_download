@@ -1,7 +1,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 import aiohttp
 from .downloaders import BingDownloader, GoogleDownloader, BaiduDownloader
 from .utils import download_image
@@ -46,7 +46,10 @@ class ImageDownloader:
         keyword_dir = self.output_dir / keyword
         keyword_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Starting search for '{keyword}', count: {count}, sources: {sources}")
+        logger.info(
+            f"Starting search for '{keyword}', count: {count}, "
+            f"sources: {sources}"
+        )
 
         # 收集所有来源的 URL（带来源标记）
         url_sources = []
@@ -60,7 +63,9 @@ class ImageDownloader:
         url_sources = url_sources[:count]
 
         # 并发下载
-        stats = await self._download_concurrent(keyword, keyword_dir, url_sources)
+        stats = await self._download_concurrent(
+            keyword, keyword_dir, url_sources
+        )
 
         return {
             "total": count,
@@ -104,13 +109,16 @@ class ImageDownloader:
 
         async def fetch_from_source(source_name: str) -> Dict[str, str]:
             """从单个来源获取 URL"""
+            # 检查来源是否有效（防御性编程，虽然调用方已过滤）
             if source_name not in self.downloaders:
                 logger.warning(f"Unknown source: {source_name}")
                 return {}
 
             try:
                 downloader = self.downloaders[source_name]
-                urls: Set[str] = await downloader.search_with_pagination(keyword)
+                urls: Set[str] = await downloader.search_with_pagination(
+                    keyword
+                )
                 logger.info(
                     f"{source_name}: found {len(urls)} unique URLs"
                 )
@@ -118,8 +126,8 @@ class ImageDownloader:
                 return {url: source_name for url in urls}
             except NotImplementedError:
                 logger.warning(
-                    f"{source_name} does not implement search_with_pagination, "
-                    "skipping"
+                    f"{source_name} does not implement "
+                    f"search_with_pagination, skipping"
                 )
                 return {}
             except Exception as e:
@@ -143,7 +151,9 @@ class ImageDownloader:
         url_sources = list(url_to_source.items())
 
         # 并发下载
-        stats = await self._download_concurrent(keyword, keyword_dir, url_sources)
+        stats = await self._download_concurrent(
+            keyword, keyword_dir, url_sources
+        )
 
         return {
             "total": total_urls,
@@ -157,7 +167,7 @@ class ImageDownloader:
         self,
         keyword: str,
         save_dir: Path,
-        url_sources: List[tuple]
+        url_sources: List[Tuple[str, str]]
     ) -> Dict[str, Any]:
         """并发下载图片"""
         success_count = 0
@@ -174,6 +184,17 @@ class ImageDownloader:
             for idx, (url, source) in enumerate(url_sources):
                 # 创建闭包捕获正确的 url 和 session
                 async def bound_download(u=url, s=source, i=idx):
+                    """
+                    内部下载函数，使用闭包捕获循环变量
+
+                    Args:
+                        u: 图片URL
+                        s: 来源名称
+                        i: 索引序号
+
+                    Returns:
+                        bool: 下载是否成功
+                    """
                     async with semaphore:
                         # 文件命名格式: 关键词_序号.扩展名
                         ext = self._get_extension(u)

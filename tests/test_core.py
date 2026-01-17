@@ -55,6 +55,9 @@ async def test_search_with_pagination_parallel(tmp_path, mocker):
         execution_order.append(keyword)
 
         # Return different URLs for different sources to test merging
+        # Note: Using str(type(mocker.call_args)) is a heuristic to
+        # identify which downloader is being called. This is fragile but
+        # works for testing.
         if "bing" in str(type(mocker.call_args)):
             return {
                 "http://example.com/bing1.jpg",
@@ -75,7 +78,8 @@ async def test_search_with_pagination_parallel(tmp_path, mocker):
         side_effect=mock_search_with_pagination
     )
     mocker.patch(
-        "img_download.downloaders.baidu.BaiduDownloader.search_with_pagination",
+        "img_download.downloaders.baidu."
+        "BaiduDownloader.search_with_pagination",
         side_effect=mock_search_with_pagination
     )
 
@@ -132,7 +136,8 @@ async def test_search_with_pagination_deduplication(tmp_path, mocker):
         side_effect=mock_bing_pagination
     )
     mocker.patch(
-        "img_download.downloaders.baidu.BaiduDownloader.search_with_pagination",
+        "img_download.downloaders.baidu."
+        "BaiduDownloader.search_with_pagination",
         side_effect=mock_baidu_pagination
     )
 
@@ -145,7 +150,9 @@ async def test_search_with_pagination_deduplication(tmp_path, mocker):
     mocker.patch("img_download.core.download_image", side_effect=mock_download)
 
     downloader = ImageDownloader(output_dir=str(tmp_path))
-    result = await downloader.search_with_pagination("cat", sources=["bing", "baidu"])
+    result = await downloader.search_with_pagination(
+        "cat", sources=["bing", "baidu"]
+    )
 
     # Total should be: shared (2) + bing_only (2) + baidu_only (2) = 6
     # NOT: (shared + bing_only) + (shared + baidu_only) = 8
@@ -174,7 +181,8 @@ async def test_search_with_pagination_source_tracking(tmp_path, mocker):
         side_effect=mock_bing_pagination
     )
     mocker.patch(
-        "img_download.downloaders.baidu.BaiduDownloader.search_with_pagination",
+        "img_download.downloaders.baidu."
+        "BaiduDownloader.search_with_pagination",
         side_effect=mock_baidu_pagination
     )
 
@@ -187,7 +195,9 @@ async def test_search_with_pagination_source_tracking(tmp_path, mocker):
     mocker.patch("img_download.core.download_image", side_effect=mock_download)
 
     downloader = ImageDownloader(output_dir=str(tmp_path))
-    result = await downloader.search_with_pagination("cat", sources=["bing", "baidu"])
+    result = await downloader.search_with_pagination(
+        "cat", sources=["bing", "baidu"]
+    )
 
     # Verify source statistics
     assert "sources" in result
@@ -242,7 +252,8 @@ async def test_search_with_pagination_not_implemented(tmp_path, mocker):
         }
 
     mocker.patch(
-        "img_download.downloaders.google.GoogleDownloader.search_with_pagination",
+        "img_download.downloaders.google."
+        "GoogleDownloader.search_with_pagination",
         side_effect=mock_not_implemented
     )
     mocker.patch(
@@ -282,7 +293,8 @@ async def test_search_with_pagination_exception_handling(tmp_path, mocker):
         }
 
     mocker.patch(
-        "img_download.downloaders.baidu.BaiduDownloader.search_with_pagination",
+        "img_download.downloaders.baidu."
+        "BaiduDownloader.search_with_pagination",
         side_effect=mock_baidu_error
     )
     mocker.patch(
@@ -301,7 +313,8 @@ async def test_search_with_pagination_exception_handling(tmp_path, mocker):
     downloader = ImageDownloader(output_dir=str(tmp_path))
     result = await downloader.search_with_pagination("cat")
 
-    # Should succeed with only Bing's results (Baidu error is logged but doesn't crash)
+    # Should succeed with only Bing's results (Baidu error is logged
+    # but doesn't crash)
     assert result["total"] == 2
     assert result["success"] == 2
     assert result["failed"] == 0
@@ -327,7 +340,8 @@ async def test_search_with_pagination_custom_sources(tmp_path, mocker):
         side_effect=mock_bing_pagination
     )
     mocker.patch(
-        "img_download.downloaders.baidu.BaiduDownloader.search_with_pagination",
+        "img_download.downloaders.baidu."
+        "BaiduDownloader.search_with_pagination",
         side_effect=mock_baidu_pagination
     )
 
