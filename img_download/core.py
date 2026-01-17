@@ -1,7 +1,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 import aiohttp
 from .downloaders import BingDownloader, GoogleDownloader, BaiduDownloader
 from .utils import download_image
@@ -64,6 +64,89 @@ class ImageDownloader:
 
         return {
             "total": count,
+            "success": stats["success"],
+            "failed": stats["failed"],
+            "sources": stats.get("sources", {}),
+            "path": str(keyword_dir)
+        }
+
+    async def search_with_pagination(
+        self,
+        keyword: str,
+        sources: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        使用分页搜索并下载图片（并行多来源）
+
+        调用所有配置的下载器的 search_with_pagination() 方法，
+        合并结果并进行全局去重，然后并发下载。
+
+        Args:
+            keyword: 搜索关键词
+            sources: 图片来源列表，None 则使用全部
+
+        Returns:
+            统计结果字典
+        """
+        if sources is None:
+            sources = list(self.downloaders.keys())
+
+        # 创建关键词文件夹
+        keyword_dir = self.output_dir / keyword
+        keyword_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info(
+            f"Starting paginated search for '{keyword}', sources: {sources}"
+        )
+
+        # 并行调用所有来源的 search_with_pagination
+        url_to_source: Dict[str, str] = {}
+
+        async def fetch_from_source(source_name: str) -> Dict[str, str]:
+            """从单个来源获取 URL"""
+            if source_name not in self.downloaders:
+                logger.warning(f"Unknown source: {source_name}")
+                return {}
+
+            try:
+                downloader = self.downloaders[source_name]
+                urls: Set[str] = await downloader.search_with_pagination(keyword)
+                logger.info(
+                    f"{source_name}: found {len(urls)} unique URLs"
+                )
+                # 返回 URL 到 source 的映射
+                return {url: source_name for url in urls}
+            except NotImplementedError:
+                logger.warning(
+                    f"{source_name} does not implement search_with_pagination, "
+                    "skipping"
+                )
+                return {}
+            except Exception as e:
+                logger.error(f"Error fetching from {source_name}: {e}")
+                return {}
+
+        # 并行执行所有来源的搜索
+        tasks = [fetch_from_source(source) for source in sources]
+        results = await asyncio.gather(*tasks)
+
+        # 合并结果（全局去重）
+        for result in results:
+            url_to_source.update(result)
+
+        total_urls = len(url_to_source)
+        logger.info(
+            f"Global deduplication: {total_urls} unique URLs from all sources"
+        )
+
+        # 转换为 (url, source) 列表用于下载
+        url_sources = list(url_to_source.items())
+
+        # 并发下载
+        stats = await self._download_concurrent(keyword, keyword_dir, url_sources)
+
+        return {
+            "total": total_urls,
             "success": stats["success"],
             "failed": stats["failed"],
             "sources": stats.get("sources", {}),
