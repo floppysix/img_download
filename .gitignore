@@ -1,1 +1,11 @@
 .worktrees/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*$py.class
+.coverage
+htmlcov/
+*.log
+output/
+dist/
+*.egg-info/
