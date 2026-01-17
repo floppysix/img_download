@@ -18,6 +18,7 @@ class BingDownloader(BaseImageDownloader):
     max_pages = 20
     max_empty_pages = 2
     max_total_images = 2000  # 添加此属性以支持上限检查
+    request_delay = 0.3  # 每页请求间隔（秒），避免速率限制
 
     def __init__(self):
         super().__init__("bing")
@@ -124,6 +125,10 @@ class BingDownloader(BaseImageDownloader):
                 try:
                     # 获取单页数据（使用共享 Session 和 headers）
                     urls = await self._fetch_page(keyword, first, self.page_size, session, headers)
+
+                    # 添加请求间隔，避免速率限制（从第二页开始）
+                    if page > 0:
+                        await asyncio.sleep(self.request_delay)
 
                     # 验证 URL
                     valid_urls = await self._validate_urls(urls)
