@@ -287,21 +287,24 @@ class BaiduDownloader(BaseImageDownloader, SeleniumMixin):
         """
         from selenium.webdriver.common.by import By
 
-        urls = []
+        urls = set()  # 使用 set 自动去重
 
         try:
-            # 百度的图片在 data-imgurl 属性中
-            img_elements = driver.find_elements(
-                By.CSS_SELECTOR,
-                "img[data-imgurl]"
-            )
+            # 方法 1: 提取所有 img[src]，直接使用 src 属性
+            img_elements = driver.find_elements(By.TAG_NAME, "img")
 
             for img in img_elements:
-                url = img.get_attribute("data-imgurl")
-                if url and url.startswith("http"):
-                    urls.append(url)
+                try:
+                    src = img.get_attribute("src")
+                    # 过滤掉百度自己的 logo 和小图标
+                    if (src and src.startswith("http") and
+                        "baidu.com/img/flexible/logo" not in src and
+                        "data:image" not in src):  # 排除 base64 图片
+                        urls.add(src)
+                except:
+                    pass
 
         except Exception as e:
             logger.warning(f"Error extracting URLs with Selenium: {e}")
 
-        return urls
+        return list(urls)

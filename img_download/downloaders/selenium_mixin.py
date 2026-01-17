@@ -153,6 +153,8 @@ class SeleniumMixin:
         """
         尝试点击"加载更多"按钮
 
+        使用 JavaScript 点击以避免元素被覆盖的问题
+
         Args:
             driver: Selenium WebDriver 实例
 
@@ -176,10 +178,14 @@ class SeleniumMixin:
                     By.XPATH,
                     f"//*[contains(text(), '{text}')]"
                 )
-                button.click()
+                # 使用 JavaScript 点击，避免元素被覆盖的问题
+                driver.execute_script("arguments[0].click();", button)
                 time.sleep(self.scroll_pause_time)
                 return True
             except NoSuchElementException:
+                continue
+            except Exception:
+                # 点击失败，继续尝试下一个按钮
                 continue
 
         return False
