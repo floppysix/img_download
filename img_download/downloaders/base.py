@@ -81,21 +81,28 @@ class BaseImageDownloader(ABC):
         ct = response.headers.get('Content-Type', '')
         return ct.startswith('image/')
 
-    def _should_stop(self, valid_urls: List[str], page_size: int, empty_count: int) -> bool:
+    def _should_stop(self, valid_urls: List[str], page_size: int, empty_count: int, current_page: int = 0, max_pages: int = 20, max_empty_pages: int = 2) -> bool:
         """
         判断是否应该停止分页
 
         Args:
-            valid_urls: 当前页有效 URL 数量
+            valid_urls: 当前页有效 URL 列表
             page_size: 每页请求的数量
             empty_count: 当前连续空页数
+            current_page: 当前页码（从 0 开始）
+            max_pages: 最大请求页数（硬性上限）
+            max_empty_pages: 连续空页停止阈值
 
         Returns:
             是否应该停止
         """
+        # 硬性上限：最大页数
+        if current_page >= max_pages:
+            return True
+
         # 连续空页停止
         if len(valid_urls) == 0:
-            return empty_count >= 2
+            return empty_count >= max_empty_pages
 
         # 末页检测：返回数量 < 30%
         if len(valid_urls) < page_size * 0.3:
