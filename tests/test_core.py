@@ -1,6 +1,5 @@
 import pytest
 from img_download import ImageDownloader
-from pathlib import Path
 
 
 @pytest.mark.asyncio
