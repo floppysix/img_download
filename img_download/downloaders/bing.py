@@ -1,6 +1,7 @@
 from typing import List
 import aiohttp
-from selectolax.lexbor import LexborHTMLParser
+import re
+import html
 from .base import BaseImageDownloader
 from ..logger import setup_logger
 
@@ -56,18 +57,20 @@ class BingDownloader(BaseImageDownloader):
 
         return urls
 
-    def _parse_image_urls(self, html: str) -> List[str]:
+    def _parse_image_urls(self, html_content: str) -> List[str]:
         """从 HTML 中解析图片 URL"""
         urls = []
 
         try:
-            parser = LexborHTMLParser(html)
+            # Bing 返回的数据格式: murl&quot;:&quot;URL&quot;
+            # 使用正则表达式提取并解码 HTML 实体
+            pattern = r'murl&quot;:&quot;([^&]+)&quot;'
+            matches = re.findall(pattern, html_content)
 
-            # Bing 的图片 URL 通常在 murl 属性中
-            for node in parser.css("div[murl]"):
-                url = node.attributes.get("murl")
-                if url:
-                    urls.append(url)
+            for match in matches:
+                # 解码 HTML 实体（&quot; -> "）
+                decoded_url = html.unescape(match)
+                urls.append(decoded_url)
 
         except Exception as e:
             logger.error(f"Error parsing HTML: {e}")
