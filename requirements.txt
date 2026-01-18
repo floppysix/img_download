@@ -1,5 +1,15 @@
-aiohttp>=3.9.0
-selectolax>=0.3.0
-pytest>=7.0.0
-pytest-asyncio>=0.21.0
-pytest-mock>=3.10.0
+# HTTP 客户端 - 稳定版本（经过测试验证）
+aiohttp==3.10.5
+yarl==1.11.0
+multidict==6.0.4
+frozenlist==1.4.0
+aiosignal==1.2.0
+aiohappyeyeballs==2.4.0
+attrs>=25.0.0
+
+# Brotli 解压缩（处理 Bing 的 brotli 压缩响应）
+brotli
+
+# Selenium（用于需要浏览器的场景）
+selenium>=4.0.0
+webdriver-manager>=4.0.0

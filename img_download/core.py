@@ -20,7 +20,8 @@ class ImageDownloader:
         selenium_enabled: bool = True,
         headless: bool = True,
         verbose: bool = True,
-        max_total_images: int = 2000
+        max_total_images: int = 2000,
+        bing_use_selenium: bool = False
     ):
         """
         初始化图片下载器
@@ -32,16 +33,18 @@ class ImageDownloader:
             headless: 是否使用无头模式
             verbose: 是否显示详细日志（True=每张图片，False=进度摘要）
             max_total_images: 每个来源最多收集的图片数（默认 2000）
+            bing_use_selenium: Bing 是否使用 Selenium 模式（默认 False 使用 aiohttp）
         """
         self.output_dir = Path(output_dir)
         self.max_concurrent = max_concurrent
         self.selenium_enabled = selenium_enabled
         self.verbose = verbose
         self.max_total_images = max_total_images
+        self.bing_use_selenium = bing_use_selenium
 
         # 初始化下载器
         self.downloaders = {
-            "bing": BingDownloader(),
+            "bing": BingDownloader(use_selenium=bing_use_selenium),
             "baidu": BaiduDownloader(),
             "google": GoogleDownloader(),
         }
@@ -177,7 +180,7 @@ class ImageDownloader:
                 logger.error(f"Error fetching from {source_name}: {e}")
                 return {}
 
-        # 并行执行所有来源的搜索
+        # 并行调用所有来源的搜索
         tasks = [fetch_from_source(source) for source in sources]
         results = await asyncio.gather(*tasks)
 

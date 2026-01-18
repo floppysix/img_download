@@ -17,7 +17,7 @@ def setup_logger(name: str = "img_download", log_file: str = "download.log") -> 
 
     # 控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.WARNING)
+    console_handler.setLevel(logging.INFO)
 
     # 格式化
     formatter = logging.Formatter(

@@ -23,6 +23,14 @@ debug_*.py
 debug_*.html
 
 # Downloaded images and test directories
+downloads/
 verify_*.py
 diagnose.py
 nul
+
+# Comparison test files
+compare_test.py
+simple_test.py
+
+# Test output directories
+examples/
